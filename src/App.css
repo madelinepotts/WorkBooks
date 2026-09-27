@@ -96,8 +96,8 @@ input {
   gap: 14px;
 }
 
-.primary-button,
-.secondary-button {
+.new-customer-button,
+.add-job-button {
   width: 100%;
   min-height: 56px;
   padding: 14px 18px;
@@ -110,25 +110,25 @@ input {
   cursor: pointer;
 }
 
-.primary-button {
+.new-customer-button {
   border: none;
 
   background: #2563eb;
   color: white;
 }
 
-.primary-button:hover {
+.new-customer-button:hover {
   background: #1d4ed8;
 }
 
-.secondary-button {
+.add-job-button {
   border: 2px solid #2563eb;
 
   background: white;
   color: #2563eb;
 }
 
-.secondary-button:hover {
+.add-job-button:hover {
   background: #eff6ff;
 }
 
@@ -166,4 +166,80 @@ input {
 
 .bottom-nav button:first-child {
   color: #2563eb;
+}
+
+.job-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.job-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+
+  font-weight: 600;
+}
+
+.job-form textarea,
+.job-form select {
+  width: 100%;
+  padding: 12px 14px;
+
+  border: 1px solid #cfd5dd;
+  border-radius: 8px;
+
+  background: white;
+  color: #1f2937;
+
+  font: inherit;
+}
+
+.job-form textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.job-form select {
+  min-height: 50px;
+}
+
+.header-customer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  margin-top: 10px;
+}
+
+.header-customer-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: white;
+}
+
+.header-customer-address {
+  font-size: 0.9rem;
+  color: #dbe7f5;
+}
+
+.header-customer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  margin-top: 10px;
+}
+
+.header-customer-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: white;
+}
+
+.header-customer-phone,
+.header-customer-address {
+  font-size: 0.9rem;
+  color: #dbe7f5;
 }
