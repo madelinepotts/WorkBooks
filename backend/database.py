@@ -106,6 +106,31 @@ def create_database():
     # deleting any customers or jobs already saved in it.
     _add_job_columns(connection)
 
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS business_info (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            businessName TEXT NOT NULL DEFAULT '',
+            ownerName TEXT NOT NULL DEFAULT '',
+            phone TEXT NOT NULL DEFAULT '',
+            email TEXT NOT NULL DEFAULT '',
+            address TEXT NOT NULL DEFAULT '',
+            paymentInstructions TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+
+    # WorkBooks only needs one set of business information. The fixed
+    # row lets the frontend GET and PUT the same record without exposing
+    # an ID that Dad ever needs to think about.
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO business_info (id)
+        VALUES (1)
+        """
+    )
+
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS invoices (

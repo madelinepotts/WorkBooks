@@ -613,6 +613,55 @@ select {
 
 
 /* =========================================================
+   Jobs page
+   ========================================================= */
+
+/*
+ * Main content area for the Jobs tab.
+ */
+.jobs-page {
+  padding: 24px;
+}
+
+
+.jobs-page h2 {
+  margin: 0 0 16px;
+
+  font-size: 1.4rem;
+}
+
+
+/*
+ * Search jobs by customer, description, address, date, or status.
+ */
+.job-search {
+  width: 100%;
+  min-height: 50px;
+
+  margin-bottom: 22px;
+  padding: 12px 14px;
+
+  color: #1f2937;
+  background: white;
+
+  border: 1px solid #cfd5dd;
+  border-radius: 10px;
+}
+
+
+.job-search::placeholder {
+  color: #98a2b3;
+}
+
+
+.job-search:focus {
+  outline: 2px solid #bfdbfe;
+
+  border-color: #2563eb;
+}
+
+
+/* =========================================================
    Customers page
    ========================================================= */
 
@@ -754,8 +803,9 @@ select {
  */
 .customer-job-count {
   display: inline-block;
+  flex-shrink: 0;
 
-  margin-left: 8px;
+  margin-left: 0;
   padding: 4px 9px;
 
   background: #e8eefc;
@@ -1292,6 +1342,67 @@ select {
 .finance-section {
   margin-top: 30px;
 }
+
+/*
+ * Business/contact information used on generated PDF invoices.
+ */
+.invoice-business-section {
+  margin-top: 0;
+  margin-bottom: 24px;
+}
+
+
+.section-help-text {
+  margin: 5px 0 0;
+  color: #667085;
+  font-size: 0.9rem;
+}
+
+
+.invoice-business-form {
+  margin-top: 16px;
+}
+
+
+.invoice-business-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+
+  margin-top: 14px;
+  padding: 16px;
+
+  background: #f7f8fa;
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+}
+
+
+.invoice-business-card > strong {
+  color: #1f2937;
+  font-size: 1.05rem;
+}
+
+
+.invoice-business-card > span,
+.invoice-business-card > p {
+  color: #667085;
+}
+
+
+.invoice-business-card > p {
+  margin: 8px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #e2e5e9;
+  line-height: 1.4;
+}
+
+
+.invoice-info-empty-state {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
 
 .invoice-form {
   display: flex;

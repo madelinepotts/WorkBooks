@@ -13,6 +13,8 @@ import JobDetails from "./pages/JobDetails";
 import type { Customer } from "./types/Customer";
 import type { Job } from "./types/Jobs";
 import type { Invoice, InvoiceStatus } from "./types/Invoice";
+import type { BusinessInfo } from "./types/BusinessInfo";
+import { EMPTY_BUSINESS_INFO } from "./types/BusinessInfo";
 
 import {
   createCustomer,
@@ -32,6 +34,11 @@ import {
   updateInvoice,
   updateInvoiceStatus,
 } from "./api/invoices";
+
+import {
+  getBusinessInfo,
+  updateBusinessInfo,
+} from "./api/businessInfo";
 
 import "./App.css";
 
@@ -56,6 +63,16 @@ function App() {
 
   const [invoices, setInvoices] =
     useState<Invoice[]>([]);
+
+
+  /*
+   * Business information printed on generated invoices.
+   *
+   * WorkBooks only needs one saved set of this information, so it is
+   * kept as one object rather than a list like customers or jobs.
+   */
+  const [businessInfo, setBusinessInfo] =
+    useState<BusinessInfo>(EMPTY_BUSINESS_INFO);
 
 
   /*
@@ -141,15 +158,18 @@ function App() {
           loadedCustomers,
           loadedJobs,
           loadedInvoices,
+          loadedBusinessInfo,
         ] = await Promise.all([
           getCustomers(),
           getJobs(),
           getInvoices(),
+          getBusinessInfo(),
         ]);
 
         setCustomers(loadedCustomers);
         setJobs(loadedJobs);
         setInvoices(loadedInvoices);
+        setBusinessInfo(loadedBusinessInfo);
 
       } catch (error) {
         console.error(
@@ -346,6 +366,7 @@ function App() {
     setScreen("customer-details");
   }
 
+
   /*
    * Return from Customer Details to whichever page opened it.
    *
@@ -356,6 +377,7 @@ function App() {
     setSelectedCustomer(null);
     setScreen(customerDetailsBackScreen);
   }
+
 
   /*
    * Open Job Details and remember its origin.
@@ -369,6 +391,7 @@ function App() {
     setScreen("job-details");
   }
 
+
   /*
    * Return from Job Details to whichever page opened it.
    */
@@ -376,6 +399,30 @@ function App() {
     setSelectedJob(null);
     setScreen(jobDetailsBackScreen);
   }
+
+
+  /*
+   * Save the business information used on every generated invoice.
+   */
+  async function handleUpdateBusinessInfo(
+    editedBusinessInfo: BusinessInfo
+  ) {
+    try {
+      const savedBusinessInfo =
+        await updateBusinessInfo(editedBusinessInfo);
+
+      setBusinessInfo(savedBusinessInfo);
+
+    } catch (error) {
+      console.error(
+        "Could not update business information:",
+        error
+      );
+
+      throw error;
+    }
+  }
+
 
   /*
    * Invoice changes are persisted just like customers and jobs.
@@ -401,6 +448,7 @@ function App() {
     }
   }
 
+
   async function handleUpdateInvoice(
     editedInvoice: Invoice
   ) {
@@ -425,6 +473,7 @@ function App() {
       throw error;
     }
   }
+
 
   async function handleUpdateInvoiceStatus(
     invoiceId: string,
@@ -455,6 +504,7 @@ function App() {
     }
   }
 
+
   /*
    * Find the customer belonging to the currently selected job.
    *
@@ -467,6 +517,7 @@ function App() {
             customer.id === selectedJob.customerId
         ) ?? null
       : null;
+
 
   return (
     <main className="app">
@@ -495,6 +546,7 @@ function App() {
         />
       )}
 
+
       {/* =====================================================
           New Customer
           ===================================================== */}
@@ -509,6 +561,7 @@ function App() {
         />
       )}
 
+
       {/* =====================================================
           New Job
           ===================================================== */}
@@ -521,6 +574,7 @@ function App() {
             onSave={handleNewJob}
           />
         )}
+
 
       {/* =====================================================
           Select Customer for New Job
@@ -547,6 +601,7 @@ function App() {
         />
       )}
 
+
       {/* =====================================================
           Jobs
           ===================================================== */}
@@ -565,6 +620,7 @@ function App() {
           }
         />
       )}
+
 
       {/* =====================================================
           Customers
@@ -591,6 +647,7 @@ function App() {
           }
         />
       )}
+
 
       {/* =====================================================
           Customer Details
@@ -635,6 +692,7 @@ function App() {
           />
         )}
 
+
       {/* =====================================================
           Job Details
           ===================================================== */}
@@ -669,6 +727,7 @@ function App() {
           />
         )}
 
+
       {/* =====================================================
           Finances
           ===================================================== */}
@@ -678,6 +737,8 @@ function App() {
           customers={customers}
           jobs={jobs}
           invoices={invoices}
+          businessInfo={businessInfo}
+          onUpdateBusinessInfo={handleUpdateBusinessInfo}
           onCreateInvoice={handleCreateInvoice}
           onUpdateInvoice={handleUpdateInvoice}
           onUpdateInvoiceStatus={handleUpdateInvoiceStatus}
@@ -750,5 +811,6 @@ function App() {
     </main>
   );
 }
+
 
 export default App;

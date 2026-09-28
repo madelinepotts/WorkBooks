@@ -87,3 +87,42 @@ export async function updateInvoiceStatus(
 
   return response.json();
 }
+
+
+/*
+ * Download a freshly-generated PDF copy of an invoice.
+ *
+ * Fetching the file as a Blob lets the same button work in a normal
+ * browser and inside the Tauri webview without navigating away from
+ * WorkBooks.
+ */
+export async function downloadInvoicePdf(
+  invoice: Invoice
+): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/invoices/${invoice.id}/pdf`
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to generate invoice PDF.");
+  }
+
+  const pdfBlob = await response.blob();
+  const objectUrl = URL.createObjectURL(pdfBlob);
+
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = `${invoice.invoiceNumber}.pdf`;
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  /*
+   * Give the browser/webview a moment to begin the download before
+   * releasing the temporary object URL.
+   */
+  window.setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 1000);
+}

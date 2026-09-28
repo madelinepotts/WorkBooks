@@ -3,6 +3,7 @@ import type { Job } from "../types/Jobs";
 import { formatTime, getJobTimeInfo } from "../utils/jobTime";
 import { useNow } from "../utils/useNow";
 
+
 type HomeProps = {
   customers: Customer[];
   jobs: Job[];
@@ -10,6 +11,7 @@ type HomeProps = {
   onAddJob: () => void;
   onSelectJob: (job: Job) => void;
 };
+
 
 function Home({
   customers,
@@ -20,8 +22,12 @@ function Home({
 }: HomeProps) {
   const now = useNow();
 
+
   const getCustomer = (customerId: string) =>
-    customers.find((customer) => customer.id === customerId);
+    customers.find(
+      (customer) => customer.id === customerId
+    );
+
 
   /*
    * Build YYYY-MM-DD from local date parts instead of UTC so a late
@@ -33,9 +39,23 @@ function Home({
     String(now.getDate()).padStart(2, "0"),
   ].join("-");
 
+
+  /*
+   * Home is for work Dad still needs to deal with today.
+   *
+   * Completed jobs deliberately disappear from Home even if they were
+   * scheduled for today. Active jobs remain visible even if they were
+   * originally scheduled on another day.
+   */
   const todaysJobs = jobs.filter(
-    (job) => job.scheduledDate === today || job.status === "active"
+    (job) =>
+      job.status !== "completed" &&
+      (
+        job.scheduledDate === today ||
+        job.status === "active"
+      )
   );
+
 
   return (
     <>
@@ -44,8 +64,10 @@ function Home({
         <p>Simple books for people who work.</p>
       </header>
 
+
       <section className="home">
         <h2>Today</h2>
+
 
         {todaysJobs.length === 0 ? (
           <div className="empty-state">
@@ -54,8 +76,12 @@ function Home({
         ) : (
           <div className="job-list">
             {todaysJobs.map((job) => {
-              const customer = getCustomer(job.customerId);
-              const formattedTime = formatTime(job.scheduledTime);
+              const customer =
+                getCustomer(job.customerId);
+
+              const formattedTime =
+                formatTime(job.scheduledTime);
+
 
               return (
                 <div
@@ -64,19 +90,38 @@ function Home({
                   onClick={() => onSelectJob(job)}
                 >
                   <div className="job-card-header">
-                    <strong>{customer?.name ?? "Unknown Customer"}</strong>
+                    <strong>
+                      {customer?.name ?? "Unknown Customer"}
+                    </strong>
+
                     <span className="job-status">
-                      {job.status === "active" ? "In Progress" : "Scheduled"}
+                      {job.status === "active"
+                        ? "In Progress"
+                        : "Scheduled"}
                     </span>
                   </div>
 
-                  <p className="job-description">{job.description}</p>
 
-                  {customer && <p className="job-address">{customer.address}</p>}
+                  <p className="job-description">
+                    {job.description}
+                  </p>
+
+
+                  {customer && (
+                    <p className="job-address">
+                      {customer.address}
+                    </p>
+                  )}
+
 
                   <div className="job-schedule">
-                    <span>{getJobTimeInfo(job, now)}</span>
-                    {formattedTime && <span>{formattedTime}</span>}
+                    <span>
+                      {getJobTimeInfo(job, now)}
+                    </span>
+
+                    {formattedTime && (
+                      <span>{formattedTime}</span>
+                    )}
                   </div>
                 </div>
               );
@@ -84,12 +129,20 @@ function Home({
           </div>
         )}
 
+
         <div className="home-actions">
-          <button className="new-customer-button" onClick={onNewCustomer}>
+          <button
+            className="new-customer-button"
+            onClick={onNewCustomer}
+          >
             + New Customer & Job
           </button>
 
-          <button className="add-job-button" onClick={onAddJob}>
+
+          <button
+            className="add-job-button"
+            onClick={onAddJob}
+          >
             + Add Job
           </button>
         </div>
@@ -97,5 +150,6 @@ function Home({
     </>
   );
 }
+
 
 export default Home;

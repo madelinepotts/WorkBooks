@@ -111,23 +111,25 @@ function Customers({
                   className="customer-card"
                   key={customer.id}
                 >
+                  {/*
+                   * Keep the job-count badge in the same upper-right
+                   * position used by status/count pills elsewhere.
+                   */}
                   <div className="customer-card-header">
+                    <button
+                      className="customer-name-button"
+                      onClick={() =>
+                        onSelectCustomer(customer)
+                      }
+                    >
+                      {customer.name}
+                    </button>
 
-                    <div>
-                      <button
-                        className="customer-name-button"
-                        onClick={() => onSelectCustomer(customer)}
-                      >
-                        {customer.name}
-                      </button>
-
-                      <span className="customer-job-count">
-                        {jobCount === 1
-                          ? "1 job"
-                          : `${jobCount} jobs`}
-                      </span>
-                    </div>
-
+                    <span className="customer-job-count">
+                      {jobCount === 1
+                        ? "1 job"
+                        : `${jobCount} jobs`}
+                    </span>
                   </div>
 
 
@@ -176,5 +178,6 @@ function Customers({
     </>
   );
 }
+
 
 export default Customers;
