@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { Customer } from "../types/Customer";
 import type { Job } from "../types/Jobs";
+
 import {
   formatMoney,
   formatTime,
@@ -33,7 +34,6 @@ type CustomerDetailsProps = {
    */
   onUpdateCustomer: (customer: Customer) => Promise<void>;
 };
-
 
 function CustomerDetails({
   customer,
@@ -117,7 +117,6 @@ function CustomerDetails({
     setIsEditing(true);
   }
 
-
   /*
    * Save the edited customer through the backend before returning to
    * the normal details view.
@@ -151,7 +150,6 @@ function CustomerDetails({
       setIsSaving(false);
     }
   }
-
 
   return (
     <>
@@ -393,6 +391,5 @@ function CustomerDetails({
     </>
   );
 }
-
 
 export default CustomerDetails;

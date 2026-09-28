@@ -1,11 +1,17 @@
 import { useState } from "react";
 
 import { downloadInvoicePdf } from "../api/invoices";
+
 import type { BusinessInfo } from "../types/BusinessInfo";
 import type { Customer } from "../types/Customer";
 import type { Invoice, InvoiceStatus } from "../types/Invoice";
 import type { Job } from "../types/Jobs";
-import { formatMoney, getJobAmount } from "../utils/jobTime";
+
+import {
+  formatMoney,
+  getJobAmount,
+  getWorkedHours,
+} from "../utils/jobTime";
 import { useNow } from "../utils/useNow";
 
 
@@ -37,7 +43,6 @@ type FinancesProps = {
   ) => Promise<void>;
 };
 
-
 function Finances({
   customers,
   jobs,
@@ -50,7 +55,6 @@ function Finances({
 }: FinancesProps) {
   const now = useNow();
 
-
   /*
    * Invoice creation state.
    */
@@ -62,7 +66,6 @@ function Finances({
 
   const [dueDate, setDueDate] =
     useState("");
-
 
   /*
    * Only one invoice is edited at a time to keep the page simple.
@@ -87,7 +90,6 @@ function Finances({
 
   const [invoiceError, setInvoiceError] =
     useState("");
-
 
   /*
    * Business information used at the top of every generated PDF invoice.
@@ -139,44 +141,66 @@ function Finances({
     invoices.map((invoice) => invoice.jobId)
   );
 
-
   /*
-   * Only offer jobs that have a price and have not already been invoiced.
-   * Completed jobs appear first because they are normally ready to bill.
+   * Jobs that can be turned into invoices.
+   *
+   * A job must:
+   *
+   * - be completed
+   * - not already have an invoice
+   * - have enough pricing/work information to calculate
+   *   a labor total
+   *
+   * Completed jobs are sorted with the most recently
+   * completed job first.
    */
   const invoiceableJobs = jobs
     .filter((job) => {
-      const hasPrice =
-        job.pricingType === "fixed"
-          ? job.fixedPrice !== undefined
-          : job.hourlyRate !== undefined &&
-            job.startedAt !== undefined;
+      /*
+       * Don't invoice a job until Dad explicitly
+       * marks the overall job complete.
+       */
+      if (job.status !== "completed") {
+        return false;
+      }
 
+      /*
+       * Each job should only have one invoice.
+       */
+      if (invoicedJobIds.has(job.id)) {
+        return false;
+      }
+
+      /*
+       * Fixed-price jobs only need their agreed price.
+       */
+      if (job.pricingType === "fixed") {
+        return job.fixedPrice !== undefined;
+      }
+
+      /*
+       * Hourly jobs need both an hourly rate and
+       * at least one recorded work session.
+       */
       return (
-        hasPrice &&
-        !invoicedJobIds.has(job.id)
+        job.hourlyRate !== undefined &&
+        (job.workSessions?.length ?? 0) > 0
       );
     })
     .sort((a, b) => {
-      if (
-        a.status === "completed" &&
-        b.status !== "completed"
-      ) {
-        return -1;
-      }
+      /*
+       * completedAt is the best timestamp for sorting
+       * finished jobs. scheduledDate is a fallback for
+       * older jobs that do not have completedAt yet.
+       */
+      const aDate =
+        a.completedAt ?? a.scheduledDate;
 
-      if (
-        a.status !== "completed" &&
-        b.status === "completed"
-      ) {
-        return 1;
-      }
+      const bDate =
+        b.completedAt ?? b.scheduledDate;
 
-      return b.scheduledDate.localeCompare(
-        a.scheduledDate
-      );
+      return bDate.localeCompare(aDate);
     });
-
 
   const selectedJob =
     getJob(selectedJobId);
@@ -189,6 +213,15 @@ function Finances({
     ? getJobAmount(selectedJob, now)
     : 0;
 
+  /*
+   * Used to explain the labor calculation when Dad
+   * is creating an hourly invoice.
+   */
+  const selectedWorkedHours =
+    selectedJob &&
+    selectedJob.pricingType === "hourly"
+      ? getWorkedHours(selectedJob, now)
+      : 0;
 
   /*
    * Finance summary values come from saved invoices rather than temporary
@@ -199,7 +232,6 @@ function Finances({
     0
   );
 
-
   const totalPaid = invoices
     .filter(
       (invoice) => invoice.status === "paid"
@@ -208,7 +240,6 @@ function Finances({
       (sum, invoice) => sum + invoice.amount,
       0
     );
-
 
   const outstanding = invoices
     .filter(
@@ -231,7 +262,6 @@ function Finances({
         sum + getJobAmount(job, now),
       0
     );
-
 
   /*
    * There is only one set of business information for WorkBooks.
@@ -265,7 +295,6 @@ function Finances({
     setBusinessInfoError("");
     setIsEditingBusinessInfo(true);
   }
-
 
   /*
    * Save the invoice header/payment information in SQLite.
@@ -310,7 +339,6 @@ function Finances({
     }
   }
 
-
   /*
    * Create a new invoice and wait for SQLite to accept it before
    * closing the form.
@@ -328,7 +356,6 @@ function Finances({
       return;
     }
 
-
     const invoice: Invoice = {
       id: crypto.randomUUID(),
       invoiceNumber:
@@ -340,7 +367,6 @@ function Finances({
       amount: selectedAmount,
       status: "draft",
     };
-
 
     try {
       setSavingInvoiceId(invoice.id);
@@ -367,7 +393,6 @@ function Finances({
     }
   }
 
-
   /*
    * Fill the invoice edit form from the current saved invoice.
    */
@@ -380,7 +405,6 @@ function Finances({
     setEditStatus(invoice.status);
     setInvoiceError("");
   }
-
 
   /*
    * Invoice numbers and their customer/job links stay fixed after
@@ -423,7 +447,6 @@ function Finances({
     }
   }
 
-
   /*
    * Quick status buttons use the smaller status endpoint.
    */
@@ -455,7 +478,6 @@ function Finances({
     }
   }
 
-
   /*
    * Ask the backend for a fresh PDF made from the current database data.
    * The browser/Tauri webview then downloads it like a normal file.
@@ -484,7 +506,6 @@ function Finances({
     }
   }
 
-
   const hasBusinessInfo = Boolean(
     businessInfo.businessName ||
     businessInfo.ownerName ||
@@ -494,7 +515,6 @@ function Finances({
     businessInfo.paymentInstructions
   );
 
-
   return (
     <>
       <header className="app-header">
@@ -503,7 +523,6 @@ function Finances({
           Invoices, payments, and money still owed.
         </p>
       </header>
-
 
       <section className="finances-page">
 
@@ -538,7 +557,6 @@ function Finances({
           </div>
         </div>
 
-
         {/*
          * Saved information printed on PDF invoices.
          */}
@@ -564,7 +582,6 @@ function Finances({
             )}
           </div>
 
-
           {isEditingBusinessInfo ? (
             <form
               className="record-edit-form invoice-business-form"
@@ -584,7 +601,6 @@ function Finances({
                 />
               </label>
 
-
               <label>
                 Owner Name
                 <input
@@ -599,7 +615,6 @@ function Finances({
                 />
               </label>
 
-
               <label>
                 Phone
                 <input
@@ -612,7 +627,6 @@ function Finances({
                   }
                 />
               </label>
-
 
               <label>
                 Email
@@ -627,7 +641,6 @@ function Finances({
                 />
               </label>
 
-
               <label>
                 Business Address
                 <textarea
@@ -639,7 +652,6 @@ function Finances({
                   }
                 />
               </label>
-
 
               <label>
                 Payment Instructions
@@ -729,7 +741,6 @@ function Finances({
           )}
         </div>
 
-
         <button
           className="new-customer-button"
           onClick={() => {
@@ -743,7 +754,6 @@ function Finances({
             ? "Cancel Invoice"
             : "+ Create Invoice"}
         </button>
-
 
         {showInvoiceForm && (
           <form
@@ -786,32 +796,52 @@ function Finances({
               </select>
             </label>
 
-
             {selectedJob && selectedCustomer && (
               <div className="invoice-preview">
                 <div>
                   <span>Customer</span>
-                  <strong>
-                    {selectedCustomer.name}
-                  </strong>
+                  <strong>{selectedCustomer.name}</strong>
                 </div>
 
                 <div>
                   <span>Job</span>
-                  <strong>
-                    {selectedJob.description}
-                  </strong>
+                  <strong>{selectedJob.description}</strong>
                 </div>
+
+                {/*
+                 * For hourly work, show Dad exactly where
+                 * the invoice labor total came from.
+                 */}
+                {selectedJob.pricingType === "hourly" && (
+                  <div>
+                    <span>Labor</span>
+                    <strong>
+                      {selectedWorkedHours.toFixed(2)}
+                      {" hours × "}
+                      {formatMoney(
+                        selectedJob.hourlyRate ?? 0
+                      )}
+                    </strong>
+                  </div>
+                )}
+
+                {/*
+                 * Fixed-price jobs simply use the agreed
+                 * labor price.
+                 */}
+                {selectedJob.pricingType === "fixed" && (
+                  <div>
+                    <span>Labor</span>
+                    <strong>Fixed Price</strong>
+                  </div>
+                )}
 
                 <div>
                   <span>Total</span>
-                  <strong>
-                    {formatMoney(selectedAmount)}
-                  </strong>
+                  <strong>{formatMoney(selectedAmount)}</strong>
                 </div>
               </div>
             )}
-
 
             <label>
               Due Date
@@ -827,13 +857,11 @@ function Finances({
               />
             </label>
 
-
             {invoiceError && (
               <p className="form-error">
                 {invoiceError}
               </p>
             )}
-
 
             <button
               className="new-customer-button"
@@ -847,7 +875,6 @@ function Finances({
           </form>
         )}
 
-
         <div className="finance-section">
           <div className="section-heading">
             <h2>Invoices</h2>
@@ -860,7 +887,6 @@ function Finances({
               {invoiceError}
             </p>
           )}
-
 
           {invoices.length === 0 ? (
             <div className="empty-state">
@@ -892,7 +918,6 @@ function Finances({
                   const isDownloading =
                     downloadingInvoiceId === invoice.id;
 
-
                   return (
                     <div
                       className="invoice-card"
@@ -922,7 +947,6 @@ function Finances({
                             </div>
                           </div>
 
-
                           <label>
                             Amount
                             <div className="money-input">
@@ -943,7 +967,6 @@ function Finances({
                             </div>
                           </label>
 
-
                           <label>
                             Due Date
                             <input
@@ -957,7 +980,6 @@ function Finances({
                               required
                             />
                           </label>
-
 
                           <label>
                             Status
@@ -980,7 +1002,6 @@ function Finances({
                               </option>
                             </select>
                           </label>
-
 
                           <div className="edit-actions compact-edit-actions">
                             <button
@@ -1026,7 +1047,6 @@ function Finances({
                             </strong>
                           </div>
 
-
                           <p>
                             {job?.description ?? "Job"}
                           </p>
@@ -1034,7 +1054,6 @@ function Finances({
                           <p>
                             Due {invoice.dueDate}
                           </p>
-
 
                           <div className="invoice-status-row">
                             <span
@@ -1044,7 +1063,6 @@ function Finances({
                             >
                               {invoice.status}
                             </span>
-
 
                             <button
                               type="button"
@@ -1061,7 +1079,6 @@ function Finances({
                                 : "Download PDF"}
                             </button>
 
-
                             <button
                               type="button"
                               onClick={() =>
@@ -1074,7 +1091,6 @@ function Finances({
                             >
                               Edit
                             </button>
-
 
                             {invoice.status === "draft" && (
                               <button
@@ -1093,7 +1109,6 @@ function Finances({
                                 Mark Sent
                               </button>
                             )}
-
 
                             {invoice.status !== "paid" && (
                               <button
@@ -1128,6 +1143,5 @@ function Finances({
     </>
   );
 }
-
 
 export default Finances;

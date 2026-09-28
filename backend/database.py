@@ -10,7 +10,8 @@ def get_db_connection():
     Open one SQLite connection for a request.
 
     Foreign-key checking is enabled on every connection so jobs must
-    belong to real customers and invoices must belong to real jobs.
+    belong to real customers, work sessions must belong to real jobs,
+    and invoices must belong to real jobs/customers.
     """
     connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
@@ -18,31 +19,39 @@ def get_db_connection():
     return connection
 
 
-def _get_columns(connection, table_name: str) -> set[str]:
+def _get_columns(
+    connection,
+    table_name: str,
+) -> set[str]:
     """
     Return the column names already present in a table.
 
     WorkBooks is still early in development, so this small migration
     helper lets an existing workbooks.db gain new columns without
-    deleting Dad's customers or jobs.
+    deleting Dad's existing data.
     """
     rows = connection.execute(
         f"PRAGMA table_info({table_name})"
     ).fetchall()
 
-    return {row["name"] for row in rows}
+    return {
+        row["name"]
+        for row in rows
+    }
 
 
 def _add_job_columns(connection):
     """
-    Upgrade an older jobs table to the current frontend Job type.
+    Upgrade an older jobs table to the current Job model.
 
-    SQLite supports adding nullable columns safely with ALTER TABLE,
-    which is exactly what we need for the optional pricing and work-time
-    fields. Existing jobs remain valid and simply have NULL values for
-    fields that did not exist when they were created.
+    We are keeping startedAt temporarily even though new work timing uses
+    work_sessions. It lets us migrate jobs that were started before the
+    multi-session timer was introduced without losing their recorded time.
     """
-    job_columns = _get_columns(connection, "jobs")
+    job_columns = _get_columns(
+        connection,
+        "jobs",
+    )
 
     migrations = {
         "hourlyRate": "REAL",
@@ -54,119 +63,196 @@ def _add_job_columns(connection):
     for column_name, column_type in migrations.items():
         if column_name not in job_columns:
             connection.execute(
-                f"ALTER TABLE jobs ADD COLUMN {column_name} {column_type}"
+                f"""
+                ALTER TABLE jobs
+                ADD COLUMN {column_name} {column_type}
+                """
             )
+
+
+def _migrate_old_work_times(connection):
+    """
+    Convert the original single-timer job format into one work session.
+
+    Older jobs stored work timing directly on jobs.startedAt and
+    jobs.completedAt. New jobs can contain many Start Work -> Pause Work
+    sessions in work_sessions.
+
+    The deterministic legacy ID makes this safe to run every time the
+    backend starts. INSERT OR IGNORE prevents duplicate migration rows.
+    """
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO work_sessions (
+            id,
+            jobId,
+            startedAt,
+            endedAt
+        )
+
+        SELECT
+            'legacy-' || id,
+            id,
+            startedAt,
+            completedAt
+
+        FROM jobs
+
+        WHERE startedAt IS NOT NULL
+        """
+    )
 
 
 def create_database():
     """
-    Create the WorkBooks database and apply the small migrations needed
-    by the current frontend.
+    Create the WorkBooks database and apply small migrations.
 
-    This function is intentionally safe to run every time the backend
-    starts. CREATE TABLE IF NOT EXISTS and the column checks prevent it
-    from replacing existing data.
+    This function is safe to run every time the backend starts. Existing
+    customers, jobs, invoices, business information, and work sessions are
+    preserved.
     """
     connection = get_db_connection()
 
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS customers (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            email TEXT,
-            address TEXT NOT NULL
+    try:
+        # ---------------------------------------------------------
+        # Customers
+        # ---------------------------------------------------------
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS customers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                email TEXT,
+                address TEXT NOT NULL
+            )
+            """
         )
-        """
-    )
 
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS jobs (
-            id TEXT PRIMARY KEY,
-            customerId TEXT NOT NULL,
-            description TEXT NOT NULL,
-            scheduledDate TEXT NOT NULL,
-            scheduledTime TEXT,
-            pricingType TEXT NOT NULL,
-            hourlyRate REAL,
-            fixedPrice REAL,
-            startedAt TEXT,
-            completedAt TEXT,
-            status TEXT NOT NULL,
+        # ---------------------------------------------------------
+        # Jobs
+        # ---------------------------------------------------------
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                customerId TEXT NOT NULL,
+                description TEXT NOT NULL,
+                scheduledDate TEXT NOT NULL,
+                scheduledTime TEXT,
+                pricingType TEXT NOT NULL,
+                hourlyRate REAL,
+                fixedPrice REAL,
+                startedAt TEXT,
+                completedAt TEXT,
+                status TEXT NOT NULL,
 
-            FOREIGN KEY (customerId)
-                REFERENCES customers(id)
+                FOREIGN KEY (customerId)
+                    REFERENCES customers(id)
+            )
+            """
         )
-        """
-    )
 
-    # If this is an older database, add the new Job fields without
-    # deleting any customers or jobs already saved in it.
-    _add_job_columns(connection)
+        # Add fields missing from older WorkBooks databases.
+        _add_job_columns(connection)
 
+        # ---------------------------------------------------------
+        # Work sessions
+        # ---------------------------------------------------------
+        # One job can contain any number of work sessions. endedAt is
+        # NULL while Dad is actively working.
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS work_sessions (
+                id TEXT PRIMARY KEY,
+                jobId TEXT NOT NULL,
+                startedAt TEXT NOT NULL,
+                endedAt TEXT,
 
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS business_info (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            businessName TEXT NOT NULL DEFAULT '',
-            ownerName TEXT NOT NULL DEFAULT '',
-            phone TEXT NOT NULL DEFAULT '',
-            email TEXT NOT NULL DEFAULT '',
-            address TEXT NOT NULL DEFAULT '',
-            paymentInstructions TEXT NOT NULL DEFAULT ''
+                FOREIGN KEY (jobId)
+                    REFERENCES jobs(id)
+                    ON DELETE CASCADE
+            )
+            """
         )
-        """
-    )
 
-    # WorkBooks only needs one set of business information. The fixed
-    # row lets the frontend GET and PUT the same record without exposing
-    # an ID that Dad ever needs to think about.
-    connection.execute(
-        """
-        INSERT OR IGNORE INTO business_info (id)
-        VALUES (1)
-        """
-    )
+        # Preserve time recorded with the original one-timer design.
+        _migrate_old_work_times(connection)
 
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS invoices (
-            id TEXT PRIMARY KEY,
-            invoiceNumber TEXT NOT NULL UNIQUE,
-            customerId TEXT NOT NULL,
-            jobId TEXT NOT NULL UNIQUE,
-            createdAt TEXT NOT NULL,
-            dueDate TEXT NOT NULL,
-            amount REAL NOT NULL,
-            status TEXT NOT NULL,
-
-            FOREIGN KEY (customerId)
-                REFERENCES customers(id),
-
-            FOREIGN KEY (jobId)
-                REFERENCES jobs(id)
+        # ---------------------------------------------------------
+        # Business information
+        # ---------------------------------------------------------
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS business_info (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                businessName TEXT NOT NULL DEFAULT '',
+                ownerName TEXT NOT NULL DEFAULT '',
+                phone TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
+                address TEXT NOT NULL DEFAULT '',
+                paymentInstructions TEXT NOT NULL DEFAULT ''
+            )
+            """
         )
-        """
-    )
 
-    # These indexes make the common "show me this customer's jobs" and
-    # invoice lookups inexpensive as the database grows.
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_jobs_customerId
-        ON jobs(customerId)
-        """
-    )
+        # WorkBooks only needs one business-information record.
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO business_info (id)
+            VALUES (1)
+            """
+        )
 
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_invoices_customerId
-        ON invoices(customerId)
-        """
-    )
+        # ---------------------------------------------------------
+        # Invoices
+        # ---------------------------------------------------------
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS invoices (
+                id TEXT PRIMARY KEY,
+                invoiceNumber TEXT NOT NULL UNIQUE,
+                customerId TEXT NOT NULL,
+                jobId TEXT NOT NULL UNIQUE,
+                createdAt TEXT NOT NULL,
+                dueDate TEXT NOT NULL,
+                amount REAL NOT NULL,
+                status TEXT NOT NULL,
 
-    connection.commit()
-    connection.close()
+                FOREIGN KEY (customerId)
+                    REFERENCES customers(id),
+
+                FOREIGN KEY (jobId)
+                    REFERENCES jobs(id)
+            )
+            """
+        )
+
+        # ---------------------------------------------------------
+        # Indexes
+        # ---------------------------------------------------------
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_jobs_customerId
+            ON jobs(customerId)
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_work_sessions_jobId
+            ON work_sessions(jobId)
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_invoices_customerId
+            ON invoices(customerId)
+            """
+        )
+
+        connection.commit()
+
+    finally:
+        connection.close()

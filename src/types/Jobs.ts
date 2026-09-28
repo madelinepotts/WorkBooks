@@ -14,12 +14,17 @@ export type Job = {
   hourlyRate?: number;
   fixedPrice?: number;
 
-  /*
-   * Actual work timestamps. These are ISO strings so elapsed
-   * time can be reconstructed even if the page is closed.
+   /*
+   * A completed job still needs a final completion
+   * timestamp even though its work is stored as sessions.
    */
-  startedAt?: string;
   completedAt?: string;
+
+  /*
+   * Every Start/Resume -> Pause cycle becomes one
+   * work session.
+   */
+  workSessions?: WorkSession[];
 
   status: "upcoming" | "active" | "completed";
 };

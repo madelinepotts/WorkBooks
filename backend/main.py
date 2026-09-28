@@ -8,7 +8,7 @@ from xml.sax.saxutils import escape
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
@@ -61,6 +61,13 @@ class Customer(BaseModel):
     address: str
 
 
+class WorkSession(BaseModel):
+    id: str
+    jobId: str
+    startedAt: str
+    endedAt: str | None = None
+
+
 class Job(BaseModel):
     id: str
     customerId: str
@@ -73,9 +80,11 @@ class Job(BaseModel):
     hourlyRate: float | None = None
     fixedPrice: float | None = None
 
-    # ISO timestamps saved when Dad starts and finishes actual work.
-    startedAt: str | None = None
+    # A job can be completed independently of any individual work session.
     completedAt: str | None = None
+
+    # Every Start Work -> Pause Work period is stored separately.
+    workSessions: list[WorkSession] = Field(default_factory=list)
 
     status: Literal["upcoming", "active", "completed"]
 
@@ -108,21 +117,103 @@ class InvoiceStatusUpdate(BaseModel):
 ### Helper functions ###
 ########################
 
-def _serialize_job(row: sqlite3.Row) -> dict:
-    """
-    Convert a jobs row to JSON-friendly data.
+def _serialize_work_session(row: sqlite3.Row) -> dict:
+    """Convert one work_sessions row into the frontend WorkSession shape."""
+    session = dict(row)
 
-    Optional Job properties are omitted when SQLite stores NULL. This
-    matches the frontend's TypeScript type, where those properties are
-    optional rather than explicitly null.
+    if session.get("endedAt") is None:
+        session.pop("endedAt", None)
+
+    return session
+
+
+def _get_work_sessions(
+    connection,
+    job_id: str,
+) -> list[dict]:
+    """Return every work session for a job in chronological order."""
+    rows = connection.execute(
+        """
+        SELECT *
+        FROM work_sessions
+        WHERE jobId = ?
+        ORDER BY startedAt ASC
+        """,
+        (job_id,),
+    ).fetchall()
+
+    return [
+        _serialize_work_session(row)
+        for row in rows
+    ]
+
+
+def _replace_work_sessions(
+    connection,
+    job: Job,
+):
+    """
+    Replace the saved work sessions for one job with the sessions supplied
+    by the frontend.
+
+    The frontend sends the complete Job object on each update, so replacing
+    this small child collection keeps Start / Pause / Resume persistence
+    simple and predictable. This runs in the same SQLite transaction as the
+    job update.
+    """
+    for session in job.workSessions:
+        if session.jobId != job.id:
+            raise HTTPException(
+                status_code=400,
+                detail="Work session jobId does not match the job being updated.",
+            )
+
+    connection.execute(
+        "DELETE FROM work_sessions WHERE jobId = ?",
+        (job.id,),
+    )
+
+    for session in job.workSessions:
+        connection.execute(
+            """
+            INSERT INTO work_sessions (
+                id,
+                jobId,
+                startedAt,
+                endedAt
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                session.id,
+                session.jobId,
+                session.startedAt,
+                session.endedAt,
+            ),
+        )
+
+
+def _serialize_job(
+    connection,
+    row: sqlite3.Row,
+) -> dict:
+    """
+    Convert a jobs row into the frontend Job shape and attach its work
+    sessions.
+
+    startedAt is intentionally no longer returned. The column remains in
+    SQLite temporarily only so older one-timer jobs can be migrated safely.
     """
     job = dict(row)
+
+    # Legacy field: keep it in SQLite for migration, but do not expose it to
+    # the new frontend Job model.
+    job.pop("startedAt", None)
 
     optional_fields = (
         "scheduledTime",
         "hourlyRate",
         "fixedPrice",
-        "startedAt",
         "completedAt",
     )
 
@@ -130,8 +221,40 @@ def _serialize_job(row: sqlite3.Row) -> dict:
         if job.get(field) is None:
             job.pop(field, None)
 
+    job["workSessions"] = _get_work_sessions(
+        connection,
+        job["id"],
+    )
+
     return job
 
+
+def _worked_hours_from_sessions(
+    rows: list[sqlite3.Row],
+) -> float:
+    """Add together the duration of every completed work session."""
+    total_seconds = 0.0
+
+    for row in rows:
+        if not row["endedAt"]:
+            continue
+
+        try:
+            started = datetime.fromisoformat(
+                row["startedAt"].replace("Z", "+00:00")
+            )
+            ended = datetime.fromisoformat(
+                row["endedAt"].replace("Z", "+00:00")
+            )
+        except ValueError:
+            continue
+
+        total_seconds += max(
+            0.0,
+            (ended - started).total_seconds(),
+        )
+
+    return total_seconds / 3600
 
 def _customer_exists(connection, customer_id: str) -> bool:
     row = connection.execute(
@@ -172,7 +295,10 @@ def _pdf_text(value: str | None) -> str:
     return escape(value or "").replace("\n", "<br/>")
 
 
-def _labor_description(job: sqlite3.Row) -> str:
+def _labor_description(
+    job: sqlite3.Row,
+    work_sessions: list[sqlite3.Row],
+) -> str:
     """Build the one labor line used by the current invoice model."""
     if job["pricingType"] == "fixed":
         return "Labor - Fixed price"
@@ -182,14 +308,10 @@ def _labor_description(job: sqlite3.Row) -> str:
     if rate is None:
         return "Labor - Hourly"
 
-    if job["startedAt"] and job["completedAt"]:
-        try:
-            started = datetime.fromisoformat(job["startedAt"].replace("Z", "+00:00"))
-            completed = datetime.fromisoformat(job["completedAt"].replace("Z", "+00:00"))
-            hours = max(0.0, (completed - started).total_seconds() / 3600)
-            return f"Labor - {hours:.2f} hours @ ${rate:,.2f}/hr"
-        except ValueError:
-            pass
+    hours = _worked_hours_from_sessions(work_sessions)
+
+    if hours > 0:
+        return f"Labor - {hours:.2f} hours @ ${rate:,.2f}/hr"
 
     return f"Labor @ ${rate:,.2f}/hr"
 
@@ -229,6 +351,16 @@ def _generate_invoice_pdf(invoice_id: str) -> tuple[Path, str]:
         business = connection.execute(
             "SELECT * FROM business_info WHERE id = 1"
         ).fetchone()
+
+        work_sessions = connection.execute(
+            """
+            SELECT *
+            FROM work_sessions
+            WHERE jobId = ?
+            ORDER BY startedAt ASC
+            """,
+            (invoice["jobId"],),
+        ).fetchall()
 
     finally:
         connection.close()
@@ -396,7 +528,7 @@ def _generate_invoice_pdf(invoice_id: str) -> tuple[Path, str]:
                 )),
             ],
             [
-                Paragraph(_pdf_text(_labor_description(job)), normal),
+                Paragraph(_pdf_text(_labor_description(job, work_sessions)), normal),
                 Paragraph(f"${invoice['amount']:,.2f}", right),
             ],
         ],
@@ -527,11 +659,10 @@ def create_job(job: Job):
                 pricingType,
                 hourlyRate,
                 fixedPrice,
-                startedAt,
                 completedAt,
                 status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job.id,
@@ -542,24 +673,37 @@ def create_job(job: Job):
                 job.pricingType,
                 job.hourlyRate,
                 job.fixedPrice,
-                job.startedAt,
                 job.completedAt,
                 job.status,
             ),
         )
 
+        _replace_work_sessions(
+            connection,
+            job,
+        )
+
         connection.commit()
 
+        row = connection.execute(
+            "SELECT * FROM jobs WHERE id = ?",
+            (job.id,),
+        ).fetchone()
+
+        return _serialize_job(
+            connection,
+            row,
+        )
+
     except sqlite3.IntegrityError as error:
+        connection.rollback()
         raise HTTPException(
             status_code=409,
-            detail="Could not create job. That job ID already exists.",
+            detail="Could not create job. That job or work-session ID already exists.",
         ) from error
 
     finally:
         connection.close()
-
-    return {"message": "Job created successfully."}
 
 
 @app.post("/invoices")
@@ -733,11 +877,11 @@ def update_customer(customer_id: str, customer: Customer):
 @app.put("/jobs/{job_id}")
 def update_job(job_id: str, job: Job):
     """
-    Replace the saved data for one job.
+    Replace the saved data for one job, including all of its work sessions.
 
-    The frontend already builds a complete updated Job object when Dad
-    presses Start Job or Finish Job, so a full PUT keeps this endpoint
-    simple and predictable.
+    Start Work, Pause Work, Resume Work, Finish Job, and normal job edits all
+    arrive through this same endpoint. The job row and its work_sessions are
+    saved in one SQLite transaction so they cannot get out of sync.
     """
     if job.id != job_id:
         raise HTTPException(
@@ -765,7 +909,6 @@ def update_job(job_id: str, job: Job):
                 pricingType = ?,
                 hourlyRate = ?,
                 fixedPrice = ?,
-                startedAt = ?,
                 completedAt = ?,
                 status = ?
             WHERE id = ?
@@ -778,7 +921,6 @@ def update_job(job_id: str, job: Job):
                 job.pricingType,
                 job.hourlyRate,
                 job.fixedPrice,
-                job.startedAt,
                 job.completedAt,
                 job.status,
                 job_id,
@@ -791,12 +933,32 @@ def update_job(job_id: str, job: Job):
                 detail="Job not found.",
             )
 
+        _replace_work_sessions(
+            connection,
+            job,
+        )
+
         connection.commit()
+
+        row = connection.execute(
+            "SELECT * FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+
+        return _serialize_job(
+            connection,
+            row,
+        )
+
+    except sqlite3.IntegrityError as error:
+        connection.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Could not update job. A work-session ID may already be in use.",
+        ) from error
 
     finally:
         connection.close()
-
-    return job.model_dump(exclude_none=True)
 
 
 @app.put("/invoices/{invoice_id}")
@@ -988,51 +1150,66 @@ def get_customer(customer_id: str):
 def get_jobs():
     connection = get_db_connection()
 
-    rows = connection.execute(
-        "SELECT * FROM jobs"
-    ).fetchall()
+    try:
+        rows = connection.execute(
+            "SELECT * FROM jobs"
+        ).fetchall()
 
-    connection.close()
+        return [
+            _serialize_job(connection, row)
+            for row in rows
+        ]
 
-    return [_serialize_job(row) for row in rows]
+    finally:
+        connection.close()
 
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
     connection = get_db_connection()
 
-    row = connection.execute(
-        "SELECT * FROM jobs WHERE id = ?",
-        (job_id,),
-    ).fetchone()
+    try:
+        row = connection.execute(
+            "SELECT * FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
 
-    connection.close()
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Job not found.",
+            )
 
-    if row is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Job not found.",
+        return _serialize_job(
+            connection,
+            row,
         )
 
-    return _serialize_job(row)
+    finally:
+        connection.close()
 
 
 @app.get("/customers/{customer_id}/jobs")
 def get_customer_jobs(customer_id: str):
     connection = get_db_connection()
 
-    rows = connection.execute(
-        """
-        SELECT *
-        FROM jobs
-        WHERE customerId = ?
-        """,
-        (customer_id,),
-    ).fetchall()
+    try:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM jobs
+            WHERE customerId = ?
+            """,
+            (customer_id,),
+        ).fetchall()
 
-    connection.close()
+        return [
+            _serialize_job(connection, row)
+            for row in rows
+        ]
 
-    return [_serialize_job(row) for row in rows]
+    finally:
+        connection.close()
 
 
 @app.get("/invoices")
