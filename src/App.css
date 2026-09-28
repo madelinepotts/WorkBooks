@@ -1,47 +1,98 @@
+/* =========================================================
+   Global
+   ========================================================= */
+
+/*
+ * Use border-box everywhere so padding and borders are
+ * included in an element's declared width.
+ */
 * {
   box-sizing: border-box;
 }
 
+
+/*
+ * Global font and page colors.
+ */
 :root {
   font-family:
-    Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
     sans-serif;
 
   color: #1f2937;
   background: #eef1f4;
 }
 
+
+/*
+ * Remove the browser's default body margin and make sure
+ * the page fills the screen.
+ */
 body {
   margin: 0;
+
   min-width: 320px;
   min-height: 100vh;
 }
 
+
+/*
+ * Form controls do not always inherit the page font,
+ * so explicitly make them use it.
+ */
 button,
-input {
+input,
+textarea,
+select {
   font: inherit;
 }
 
-/* Main application */
 
+/* =========================================================
+   Main application
+   ========================================================= */
+
+/*
+ * WorkBooks is intentionally designed like a narrow
+ * mobile application.
+ *
+ * On a phone it fills the screen.
+ * On desktop it remains centered at a maximum of 520px.
+ */
 .app {
   width: 100%;
   max-width: 520px;
   min-height: 100vh;
+
   margin: 0 auto;
+
+  /*
+   * Leave room for the fixed bottom navigation.
+   */
   padding-bottom: 90px;
 
   background: white;
 }
 
-/* Header */
 
+/* =========================================================
+   Header
+   ========================================================= */
+
+/*
+ * Main blue header used at the top of pages.
+ */
 .app-header {
   padding: 28px 24px 22px;
 
   background: #183153;
   color: white;
 }
+
 
 .app-header h1 {
   margin: 0;
@@ -50,18 +101,188 @@ input {
   font-weight: 700;
 }
 
+
 .app-header p {
   margin: 6px 0 0;
 
   color: #dbe7f5;
+
   font-size: 0.95rem;
 }
 
-/* Home */
 
+/* =========================================================
+   Header customer information
+   ========================================================= */
+
+/*
+ * General customer information shown inside a header.
+ */
+.header-customer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  margin-top: 10px;
+}
+
+
+.header-customer-name {
+  color: white;
+
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+
+.header-customer-phone,
+.header-customer-address {
+  color: #dbe7f5;
+
+  font-size: 0.9rem;
+}
+
+
+/* =========================================================
+   Header back button
+   ========================================================= */
+
+/*
+ * Small Back button used inside page headers.
+ */
+.header-back-button {
+  margin: 0 0 14px;
+  padding: 0;
+
+  background: transparent;
+  color: #dbe7f5;
+
+  border: none;
+
+  font-size: 0.9rem;
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+
+.header-back-button:hover {
+  color: white;
+}
+
+
+/* =========================================================
+   Customer information on Job Details
+   ========================================================= */
+
+/*
+ * On Job Details, the customer information appears
+ * underneath the page title.
+ *
+ * Customer information is on the left and the number
+ * of jobs is shown in a badge on the right.
+ */
+.job-customer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+
+  margin-top: 12px;
+}
+
+
+/*
+ * Keep the customer's name and address together.
+ */
+.job-customer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  min-width: 0;
+}
+
+
+/*
+ * The customer name opens Customer Details.
+ *
+ * It looks like normal header text rather than a
+ * traditional button.
+ */
+.header-customer-link {
+  padding: 0;
+
+  text-align: left;
+
+  background: transparent;
+  color: white;
+
+  border: none;
+
+  font-size: 1.05rem;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition: color 0.15s ease;
+}
+
+
+/*
+ * Since only the customer name is clickable here,
+ * highlighting it helps show Dad that it is a link.
+ */
+.header-customer-link:hover {
+  color: #bfdbfe;
+}
+
+
+/*
+ * Customer address displayed underneath the name.
+ */
+.job-customer-info .header-customer-address {
+  color: #dbe7f5;
+
+  font-size: 0.9rem;
+}
+
+
+/*
+ * Number of jobs belonging to this customer.
+ *
+ * This uses the same pill style as the other small
+ * status/count badges in WorkBooks.
+ */
+.header-customer-job-count {
+  flex-shrink: 0;
+
+  padding: 4px 9px;
+
+  background: #e8eefc;
+  color: #2563eb;
+
+  border-radius: 999px;
+
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+
+/* =========================================================
+   General page content
+   ========================================================= */
+
+/*
+ * General content container.
+ *
+ * Several screens currently use .home even when they are
+ * not literally the Home page.
+ */
 .home {
   padding: 24px;
 }
+
 
 .home h2 {
   margin: 0 0 16px;
@@ -69,8 +290,19 @@ input {
   font-size: 1.4rem;
 }
 
-/* Empty job list */
 
+/* =========================================================
+   Empty states
+   ========================================================= */
+
+/*
+ * Used when a page has nothing to display.
+ *
+ * Examples:
+ *   - no jobs
+ *   - no customers
+ *   - no search results
+ */
 .empty-state {
   padding: 28px 20px;
   margin-bottom: 28px;
@@ -78,9 +310,20 @@ input {
   text-align: center;
 
   background: #f7f8fa;
+
   border: 1px solid #e2e5e9;
   border-radius: 12px;
 }
+
+
+.empty-state h2 {
+  margin: 0 0 8px;
+
+  color: #344054;
+
+  font-size: 1.15rem;
+}
+
 
 .empty-state p {
   margin: 0;
@@ -88,28 +331,45 @@ input {
   color: #667085;
 }
 
-/* Main actions */
 
+/* =========================================================
+   Home actions
+   ========================================================= */
+
+/*
+ * Container for the large action buttons on Home.
+ */
 .home-actions {
   display: flex;
   flex-direction: column;
   gap: 14px;
+
+  margin-top: 24px;
 }
 
+
+/*
+ * Shared sizing for primary Home actions.
+ */
 .new-customer-button,
 .add-job-button {
   width: 100%;
   min-height: 56px;
+
   padding: 14px 18px;
 
   border-radius: 10px;
 
-  font-weight: 600;
   font-size: 1rem;
+  font-weight: 600;
 
   cursor: pointer;
 }
 
+
+/*
+ * Primary action.
+ */
 .new-customer-button {
   border: none;
 
@@ -117,10 +377,15 @@ input {
   color: white;
 }
 
+
 .new-customer-button:hover {
   background: #1d4ed8;
 }
 
+
+/*
+ * Secondary Home action.
+ */
 .add-job-button {
   border: 2px solid #2563eb;
 
@@ -128,16 +393,764 @@ input {
   color: #2563eb;
 }
 
+
 .add-job-button:hover {
   background: #eff6ff;
 }
 
-/* Bottom navigation */
 
+/* =========================================================
+   Forms
+   ========================================================= */
+
+/*
+ * Customer and job forms use the same vertical layout.
+ */
+.customer-form,
+.job-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+
+/*
+ * Each label contains the field name and its input.
+ */
+.customer-form > label,
+.job-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+
+  width: 100%;
+
+  color: #344054;
+
+  font-weight: 600;
+}
+
+
+/*
+ * Shared form control appearance.
+ */
+.customer-form input,
+.customer-form textarea,
+.customer-form select,
+.job-form input,
+.job-form textarea,
+.job-form select {
+  display: block;
+
+  width: 100%;
+  min-height: 50px;
+
+  padding: 12px 14px;
+
+  color: #1f2937;
+  background: white;
+
+  border: 1px solid #cfd5dd;
+  border-radius: 8px;
+}
+
+
+/*
+ * Text areas need more vertical room.
+ */
+.customer-form textarea,
+.job-form textarea {
+  min-height: 110px;
+
+  resize: vertical;
+}
+
+
+/*
+ * Clearly indicate the active field.
+ */
+.customer-form input:focus,
+.customer-form textarea:focus,
+.customer-form select:focus,
+.job-form input:focus,
+.job-form textarea:focus,
+.job-form select:focus {
+  outline: 2px solid #bfdbfe;
+
+  border-color: #2563eb;
+}
+
+
+/* =========================================================
+   Job lists
+   ========================================================= */
+
+/*
+ * Vertical list containing job cards.
+ */
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  margin-bottom: 28px;
+}
+
+
+/*
+ * Individual job card.
+ */
+.job-card {
+  padding: 18px;
+
+  background: #f7f8fa;
+
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+}
+
+
+/*
+ * Customer name and status appear on the same row.
+ */
+.job-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+
+/*
+ * Main heading displayed inside a job card.
+ */
+.job-card-header strong {
+  color: #1f2937;
+
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+
+/*
+ * Small status pill such as Upcoming.
+ */
+.job-status {
+  flex-shrink: 0;
+
+  padding: 4px 9px;
+
+  background: #e8eefc;
+  color: #2563eb;
+
+  border-radius: 999px;
+
+  font-size: 0.75rem;
+  font-weight: 600;
+
+  text-transform: capitalize;
+}
+
+
+/*
+ * Main description of the work.
+ */
+.job-description {
+  margin: 12px 0 6px;
+
+  color: #344054;
+
+  font-weight: 500;
+}
+
+
+/*
+ * Customer/job address.
+ */
+.job-address {
+  margin: 0;
+
+  color: #667085;
+
+  font-size: 0.9rem;
+}
+
+
+/*
+ * Scheduled date and time at the bottom of a job card.
+ */
+.job-schedule {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+
+  margin-top: 14px;
+  padding-top: 12px;
+
+  color: #475467;
+
+  border-top: 1px solid #e2e5e9;
+
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+
+/* =========================================================
+   Clickable job cards
+   ========================================================= */
+
+/*
+ * The entire job card opens Job Details.
+ *
+ * We only use the pointer cursor here.
+ * The card does not need a separate hover highlight
+ * because the entire card is already the clickable target.
+ */
+.clickable-job-card {
+  cursor: pointer;
+}
+
+
+/* =========================================================
+   Customers page
+   ========================================================= */
+
+/*
+ * Main content area for the Customers tab.
+ */
+.customers-page {
+  padding: 24px;
+}
+
+
+/*
+ * Search field shown above the customer list.
+ */
+.customer-search {
+  width: 100%;
+  min-height: 50px;
+
+  margin-bottom: 18px;
+  padding: 12px 14px;
+
+  color: #1f2937;
+  background: white;
+
+  border: 1px solid #cfd5dd;
+  border-radius: 10px;
+}
+
+
+.customer-search::placeholder {
+  color: #98a2b3;
+}
+
+
+.customer-search:focus {
+  outline: 2px solid #bfdbfe;
+
+  border-color: #2563eb;
+}
+
+
+/* =========================================================
+   Customer list
+   ========================================================= */
+
+/*
+ * Vertical list of customers.
+ */
+.customer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  margin-bottom: 24px;
+}
+
+
+/*
+ * Individual customer card.
+ */
+.customer-card {
+  padding: 18px;
+
+  background: #f7f8fa;
+
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+}
+
+
+/*
+ * Customer name and job count area.
+ */
+.customer-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+
+/*
+ * Retained in case a customer card uses an h2.
+ */
+.customer-card-header h2 {
+  margin: 0;
+
+  color: #1f2937;
+
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+
+/*
+ * Retained in case a customer card uses strong.
+ */
+.customer-card-header strong {
+  color: #1f2937;
+
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+
+/* =========================================================
+   Clickable customer name
+   ========================================================= */
+
+/*
+ * Customer names open Customer Details.
+ */
+.customer-name-button {
+  padding: 0;
+
+  text-align: left;
+
+  background: transparent;
+  color: #1f2937;
+
+  border: none;
+
+  font-size: 1.15rem;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition: color 0.15s ease;
+}
+
+
+.customer-name-button:hover {
+  color: #2563eb;
+}
+
+
+/*
+ * Small pill showing how many jobs belong to the customer.
+ */
+.customer-job-count {
+  display: inline-block;
+
+  margin-left: 8px;
+  padding: 4px 9px;
+
+  background: #e8eefc;
+  color: #2563eb;
+
+  border-radius: 999px;
+
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+
+/* =========================================================
+   Customer contact information
+   ========================================================= */
+
+/*
+ * Container used by the Customers page.
+ */
+.customer-info {
+  margin-top: 16px;
+}
+
+
+.customer-info p {
+  margin: 10px 0;
+
+  color: #667085;
+
+  line-height: 1.4;
+}
+
+
+.customer-info strong {
+  color: #344054;
+
+  font-size: 0.85rem;
+}
+
+
+/*
+ * Retained for components that display customer
+ * information without using .customer-info.
+ */
+.customer-phone,
+.customer-email,
+.customer-address {
+  margin: 7px 0 0;
+
+  color: #667085;
+}
+
+
+/* =========================================================
+   Customer actions
+   ========================================================= */
+
+/*
+ * Add Job button shown on customer cards.
+ */
+.customer-add-job-button {
+  width: 100%;
+  min-height: 46px;
+
+  margin-top: 16px;
+  padding: 11px;
+
+  background: white;
+  color: #2563eb;
+
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+
+.customer-add-job-button:hover {
+  background: #eff6ff;
+}
+
+
+/* =========================================================
+   Select customer page
+   ========================================================= */
+
+/*
+ * When Dad presses Add Job from Home, each customer
+ * becomes a large selection button.
+ */
+.customer-select-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+
+  width: 100%;
+
+  padding: 18px;
+
+  text-align: left;
+
+  background: #f7f8fa;
+  color: #1f2937;
+
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+
+  cursor: pointer;
+}
+
+
+.customer-select-card strong {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+
+.customer-select-card span {
+  color: #667085;
+
+  font-size: 0.9rem;
+}
+
+
+/* =========================================================
+   Customer details page
+   ========================================================= */
+
+/*
+ * Main content area for one customer's page.
+ */
+.customer-details-page {
+  padding: 24px;
+}
+
+
+/*
+ * Card containing customer contact information.
+ */
+.customer-details-card {
+  margin-bottom: 18px;
+  padding: 18px;
+
+  background: #f7f8fa;
+
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+}
+
+
+.customer-details-card h2 {
+  margin: 0 0 18px;
+
+  color: #1f2937;
+
+  font-size: 1.2rem;
+}
+
+
+/*
+ * One row of customer information.
+ */
+.customer-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  margin-top: 14px;
+}
+
+
+/*
+ * Small heading above Phone, Email, Address, etc.
+ */
+.customer-detail-label {
+  color: #667085;
+
+  font-size: 0.8rem;
+  font-weight: 600;
+
+  text-transform: uppercase;
+}
+
+
+/*
+ * Separate the customer's jobs from their
+ * contact information.
+ */
+.customer-jobs-section {
+  margin-top: 30px;
+}
+
+
+/*
+ * Jobs heading and job count.
+ */
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  margin-bottom: 14px;
+}
+
+
+.section-heading h2 {
+  margin: 0;
+
+  font-size: 1.35rem;
+}
+
+
+.section-heading > span {
+  min-width: 30px;
+
+  padding: 4px 9px;
+
+  text-align: center;
+
+  background: #e8eefc;
+  color: #2563eb;
+
+  border-radius: 999px;
+
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+
+/*
+ * Pricing type shown on customer job cards.
+ */
+.job-pricing {
+  margin: 10px 0 0;
+
+  color: #667085;
+
+  font-size: 0.9rem;
+}
+
+
+/* =========================================================
+   Job details page
+   ========================================================= */
+
+/*
+ * Main content area for a single job.
+ */
+.job-details-page {
+  padding: 24px;
+}
+
+
+/*
+ * Card containing the job's main information.
+ */
+.job-details-card {
+  padding: 18px;
+
+  background: #f7f8fa;
+
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+}
+
+
+/*
+ * Job description and status badge.
+ */
+.job-details-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+
+  margin-bottom: 24px;
+}
+
+
+.job-details-heading h2 {
+  margin: 0;
+
+  color: #1f2937;
+
+  font-size: 1.25rem;
+}
+
+
+/*
+ * One group of job information.
+ *
+ * Example:
+ *
+ * Scheduled
+ * September 30, 2026
+ * 9:00 AM
+ */
+.job-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  margin-top: 18px;
+}
+
+
+/*
+ * Small heading above each job value.
+ */
+.job-detail-label {
+  color: #667085;
+
+  font-size: 0.8rem;
+  font-weight: 600;
+
+  text-transform: uppercase;
+}
+
+
+/*
+ * Main action for beginning work.
+ */
+.start-job-button {
+  width: 100%;
+  min-height: 56px;
+
+  margin-top: 20px;
+  padding: 14px 18px;
+
+  background: #2563eb;
+  color: white;
+
+  border: none;
+  border-radius: 10px;
+
+  font-size: 1rem;
+  font-weight: 700;
+
+  cursor: pointer;
+}
+
+
+.start-job-button:hover {
+  background: #1d4ed8;
+}
+
+
+/* =========================================================
+   Secondary / cancel buttons
+   ========================================================= */
+
+/*
+ * Used for lower-priority actions such as Cancel.
+ */
+.secondary-button {
+  width: 100%;
+  min-height: 48px;
+
+  padding: 12px;
+
+  background: white;
+  color: #475467;
+
+  border: 1px solid #cfd5dd;
+  border-radius: 8px;
+
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+
+.secondary-button:hover {
+  background: #f7f8fa;
+}
+
+
+/* =========================================================
+   Bottom navigation
+   ========================================================= */
+
+/*
+ * Navigation remains fixed at the bottom of the screen.
+ *
+ * Its maximum width matches .app so it stays aligned with
+ * the application on desktop.
+ */
 .bottom-nav {
   position: fixed;
   bottom: 0;
   left: 50%;
+  z-index: 100;
 
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -149,9 +1162,14 @@ input {
   transform: translateX(-50%);
 
   background: white;
+
   border-top: 1px solid #dfe3e8;
 }
 
+
+/*
+ * Each navigation button gets one equal-width column.
+ */
 .bottom-nav button {
   border: none;
 
@@ -164,82 +1182,394 @@ input {
   cursor: pointer;
 }
 
-.bottom-nav button:first-child {
+
+.bottom-nav button:hover {
+  background: #f7f8fa;
+}
+
+
+/*
+ * Highlight the page currently being viewed.
+ */
+.bottom-nav button.active {
+  background: #eff6ff;
   color: #2563eb;
 }
+/* =========================================================
+   Pricing inputs
+   ========================================================= */
 
-.job-form {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+/*
+ * Dollar inputs keep the currency marker visible without
+ * making Dad type a dollar sign himself.
+ */
+.money-input {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
 }
 
-.job-form label {
+.money-input > span {
+  color: #667085;
+  font-weight: 600;
+}
+
+
+/* =========================================================
+   Real-time job information
+   ========================================================= */
+
+.job-time-callout {
+  margin-bottom: 20px;
+  padding: 14px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.job-total-detail strong {
+  font-size: 1.35rem;
+}
+
+.complete-job-button {
+  width: 100%;
+  min-height: 56px;
+  margin-top: 20px;
+  padding: 14px 18px;
+  background: #15803d;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.complete-job-button:hover {
+  background: #166534;
+}
+
+
+/* =========================================================
+   Finances
+   ========================================================= */
+
+.finances-page {
+  padding: 24px;
+}
+
+.finance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.finance-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: #f7f8fa;
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+}
+
+.finance-summary-card span {
+  color: #667085;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.finance-summary-card strong {
+  color: #1f2937;
+  font-size: 1.25rem;
+}
+
+.finance-section {
+  margin-top: 30px;
+}
+
+.invoice-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 18px;
+  padding: 18px;
+  background: #f7f8fa;
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+}
+
+.invoice-form h2 {
+  margin: 0;
+}
+
+.invoice-form > label {
   display: flex;
   flex-direction: column;
   gap: 7px;
-
+  color: #344054;
   font-weight: 600;
 }
 
-.job-form textarea,
-.job-form select {
+.invoice-form select,
+.invoice-form input {
   width: 100%;
+  min-height: 50px;
   padding: 12px 14px;
-
-  border: 1px solid #cfd5dd;
-  border-radius: 8px;
-
   background: white;
   color: #1f2937;
-
-  font: inherit;
+  border: 1px solid #cfd5dd;
+  border-radius: 8px;
 }
 
-.job-form textarea {
-  min-height: 110px;
+.invoice-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: white;
+  border: 1px solid #e2e5e9;
+  border-radius: 10px;
+}
+
+.invoice-preview > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.invoice-preview span {
+  color: #667085;
+}
+
+.invoice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.invoice-card {
+  padding: 18px;
+  background: #f7f8fa;
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+}
+
+.invoice-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.invoice-card-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.invoice-card-header span,
+.invoice-card p {
+  color: #667085;
+}
+
+.invoice-card p {
+  margin: 10px 0 0;
+}
+
+.invoice-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e5e9;
+}
+
+.invoice-status {
+  margin-right: auto;
+  padding: 4px 9px;
+  background: #e8eefc;
+  color: #2563eb;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.invoice-status-paid {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.invoice-status-row button {
+  padding: 8px 10px;
+  background: white;
+  color: #2563eb;
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 380px) {
+  .finance-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* =========================================================
+   Editable records
+   ========================================================= */
+
+/*
+ * Customer Details and Job Details both use this simple edit form.
+ * Keeping the same form language everywhere makes editing predictable.
+ */
+.record-edit-form,
+.invoice-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px;
+  background: #f7f8fa;
+  border: 1px solid #e2e5e9;
+  border-radius: 12px;
+}
+
+.record-edit-form > label,
+.invoice-edit-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #344054;
+  font-weight: 600;
+}
+
+.record-edit-form input,
+.record-edit-form textarea,
+.record-edit-form select,
+.invoice-edit-form input,
+.invoice-edit-form select {
+  width: 100%;
+  min-height: 50px;
+  padding: 12px 14px;
+  color: #1f2937;
+  background: white;
+  border: 1px solid #cfd5dd;
+  border-radius: 8px;
+}
+
+.record-edit-form textarea {
+  min-height: 100px;
   resize: vertical;
 }
 
-.job-form select {
-  min-height: 50px;
+.record-edit-form input:focus,
+.record-edit-form textarea:focus,
+.record-edit-form select:focus,
+.invoice-edit-form input:focus,
+.invoice-edit-form select:focus {
+  outline: 2px solid #bfdbfe;
+  border-color: #2563eb;
 }
 
-.header-customer {
+.edit-form-heading,
+.details-card-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.edit-form-heading h2,
+.details-card-heading h2 {
+  margin: 0;
+}
+
+/*
+ * Small Edit controls are intentionally secondary to the main action
+ * buttons such as Start Job, Finish Job, and Add Job.
+ */
+.small-edit-button {
+  flex-shrink: 0;
+  padding: 7px 11px;
+  background: white;
+  color: #2563eb;
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.small-edit-button:hover {
+  background: #eff6ff;
+}
+
+.job-edit-button {
+  margin-top: 22px;
+}
+
+.edit-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.edit-actions .new-customer-button,
+.edit-actions .secondary-button {
+  min-height: 48px;
+  margin: 0;
+}
+
+.compact-edit-actions {
+  margin-top: 4px;
+}
+
+/*
+ * Backend errors remain visible without throwing Dad onto another page.
+ */
+.form-error {
+  margin: 0;
+  padding: 10px 12px;
+  color: #b42318;
+  background: #fef3f2;
+  border: 1px solid #fecdca;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.action-error {
+  margin-top: 14px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.invoice-edit-form .edit-form-heading > div {
   display: flex;
   flex-direction: column;
   gap: 3px;
-
-  margin-top: 10px;
 }
 
-.header-customer-name {
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: white;
-}
-
-.header-customer-address {
+.invoice-edit-form .edit-form-heading span {
+  color: #667085;
   font-size: 0.9rem;
-  color: #dbe7f5;
 }
 
-.header-customer {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-
-  margin-top: 10px;
-}
-
-.header-customer-name {
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: white;
-}
-
-.header-customer-phone,
-.header-customer-address {
-  font-size: 0.9rem;
-  color: #dbe7f5;
+@media (max-width: 380px) {
+  .edit-actions {
+    grid-template-columns: 1fr;
+  }
 }
