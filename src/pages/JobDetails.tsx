@@ -12,9 +12,16 @@ import {
 } from "../utils/jobTime";
 
 import {
-  isJobWorking,
   getTotalWorkedMs,
+  isJobWorking,
 } from "../utils/workSessions";
+
+import {
+  cleanMultilineText,
+  isPositiveMoney,
+  isValidDateInput,
+  parseMoney,
+} from "../utils/formValidation";
 
 import { useNow } from "../utils/useNow";
 
@@ -30,16 +37,11 @@ type JobDetailsProps = {
     customer: Customer
   ) => void;
 
-  /*
-   * App.tsx owns saving the job.
-   *
-   * Job Details creates the updated Job object,
-   * and App persists it through the API.
-   */
   onUpdateJob: (
     job: Job
   ) => Promise<void>;
 };
+
 
 function JobDetails({
   job,
@@ -50,20 +52,11 @@ function JobDetails({
   onUpdateJob,
 }: JobDetailsProps) {
 
-  /*
-   * Refresh once per minute.
-   *
-   * This keeps:
-   *
-   * - scheduled-time information current
-   * - active work time current
-   * - hourly labor totals current
-   */
   const now = useNow();
 
+
   /*
-   * Editing stays inside Job Details so Dad does not
-   * need to navigate to a separate editing page.
+   * Editing state.
    */
   const [isEditing, setIsEditing] =
     useState(false);
@@ -71,12 +64,16 @@ function JobDetails({
   const [
     editDescription,
     setEditDescription,
-  ] = useState(job.description);
+  ] = useState(
+    job.description
+  );
 
   const [
     editScheduledDate,
     setEditScheduledDate,
-  ] = useState(job.scheduledDate);
+  ] = useState(
+    job.scheduledDate
+  );
 
   const [
     editScheduledTime,
@@ -97,7 +94,7 @@ function JobDetails({
     setEditHourlyRate,
   ] = useState(
     job.hourlyRate !== undefined
-      ? String(job.hourlyRate)
+      ? job.hourlyRate.toFixed(2)
       : ""
   );
 
@@ -106,115 +103,101 @@ function JobDetails({
     setEditFixedPrice,
   ] = useState(
     job.fixedPrice !== undefined
-      ? String(job.fixedPrice)
+      ? job.fixedPrice.toFixed(2)
       : ""
   );
 
-  const [editError, setEditError] =
-    useState("");
-
-  const [isSaving, setIsSaving] =
-    useState(false);
-
 
   /*
-   * Count every job belonging to this customer.
+   * Validation errors.
    */
-  const customerJobCount = jobs.filter(
-    (currentJob) =>
-      currentJob.customerId === customer.id
-  ).length;
+  const [
+    descriptionError,
+    setDescriptionError,
+  ] = useState("");
+
+  const [
+    dateError,
+    setDateError,
+  ] = useState("");
+
+  const [
+    priceError,
+    setPriceError,
+  ] = useState("");
+
+  const [
+    editError,
+    setEditError,
+  ] = useState("");
+
+  const [
+    isSaving,
+    setIsSaving,
+  ] = useState(false);
+
+
+  const customerJobCount =
+    jobs.filter(
+      (currentJob) =>
+        currentJob.customerId ===
+        customer.id
+    ).length;
+
 
   /*
-   * Work sessions replace the old single startedAt
-   * timestamp.
-   *
-   * Older jobs may not have workSessions yet, so
-   * always fall back to an empty array.
+   * Work-session state.
    */
   const workSessions =
     job.workSessions ?? [];
 
-  /*
-   * A job is currently "working" when there is a
-   * session with a start time but no end time.
-   */
   const working =
-    isJobWorking(workSessions);
+    isJobWorking(
+      workSessions
+    );
 
-  /*
-   * Add together all completed sessions.
-   *
-   * If one session is currently open, its duration
-   * is calculated up to the current time.
-   */
   const totalWorkedMs =
     getTotalWorkedMs(
       workSessions,
       now
     );
 
-  /*
-   * Hours are useful for calculating hourly labor.
-   *
-   * Example:
-   *
-   * 2 hours 30 minutes -> 2.5 hours
-   */
   const workedHours =
     totalWorkedMs /
-    (1000 * 60 * 60);
+    3_600_000;
+
 
   /*
-   * Fixed jobs use their agreed price.
-   *
-   * Hourly jobs calculate the current labor amount
-   * from all recorded work sessions.
+   * Current labor value.
    */
   const currentAmount =
-    job.pricingType === "hourly"
-      ? workedHours *
-        (job.hourlyRate ?? 0)
-      : job.fixedPrice ?? 0;
+    job.pricingType === "fixed"
+      ? job.fixedPrice ?? 0
+      : workedHours *
+        (job.hourlyRate ?? 0);
 
 
   const formattedTime =
-    formatTime(job.scheduledTime);
+    formatTime(
+      job.scheduledTime
+    );
+
 
   /*
-   * Scheduled jobs still use jobTime.ts because that
-   * utility answers questions such as:
-   *
-   * "Starts in 45m"
-   * "Tomorrow"
-   * "2h past scheduled time"
-   *
-   * Once work has started, workSessions becomes the
-   * source of truth instead.
-   */
-  const scheduleTimeInfo =
-    getJobTimeInfo(job, now);
-
-  /*
-   * Convert milliseconds into something Dad can
-   * read easily.
-   *
-   * Examples:
-   *
-   * 45 min
-   * 2 hr 15 min
-   * 8 hr
+   * Human-friendly duration.
    */
   function formatWorkedTime(
     milliseconds: number
   ) {
+
     const totalMinutes =
-        Math.max(
-            0,
-            Math.floor(
-            milliseconds / 60000
-            )
-    );
+      Math.max(
+        0,
+        Math.floor(
+          milliseconds / 60_000
+        )
+      );
+
 
     const hours =
       Math.floor(
@@ -231,58 +214,32 @@ function JobDetails({
 
 
     if (minutes === 0) {
-      return hours === 1
-        ? "1 hr"
-        : `${hours} hr`;
+      return `${hours} hr`;
     }
 
 
-    return `${hours} hr ${minutes} min`;
+    return (
+      `${hours} hr ` +
+      `${minutes} min`
+    );
   }
 
-  /*
-   * The large time message shown near the top of
-   * Job Details.
-   */
-  function getTimeCallout() {
-
-    if (job.status === "completed") {
-      return (
-        `${formatWorkedTime(totalWorkedMs)} worked`
-      );
-    }
-
-
-    if (job.status === "active") {
-
-      if (working) {
-        return (
-          `Working now · ${formatWorkedTime(totalWorkedMs)} total`
-        );
-      }
-
-
-      return (
-        `Paused · ${formatWorkedTime(totalWorkedMs)} worked`
-      );
-    }
-
-
-    return scheduleTimeInfo;
-  }
 
   /*
-   * Status text should describe what is actually
-   * happening rather than simply saying Active.
+   * Derived job status displayed to Dad.
    */
   function getStatusLabel() {
 
-    if (job.status === "completed") {
+    if (
+      job.status === "completed"
+    ) {
       return "Completed";
     }
 
 
-    if (job.status === "active") {
+    if (
+      job.status === "active"
+    ) {
       return working
         ? "Working"
         : "Paused";
@@ -292,9 +249,89 @@ function JobDetails({
     return "Scheduled";
   }
 
+
   /*
-   * Start with the latest saved values every time
-   * Dad presses Edit.
+   * Main callout shown near the top of the job.
+   */
+  function getTimeCallout() {
+
+    const worked =
+      formatWorkedTime(
+        totalWorkedMs
+      );
+
+
+    if (
+      job.status === "completed"
+    ) {
+      return `${worked} worked`;
+    }
+
+
+    if (
+      job.status === "active"
+    ) {
+
+      if (working) {
+        return (
+          `Working now · ` +
+          `${worked} total`
+        );
+      }
+
+
+      return (
+        `Paused · ` +
+        `${worked} worked`
+      );
+    }
+
+
+    return getJobTimeInfo(
+      job,
+      now
+    );
+  }
+
+
+  function clearValidationErrors() {
+    setDescriptionError("");
+    setDateError("");
+    setPriceError("");
+    setEditError("");
+  }
+
+
+  /*
+   * Format prices after leaving the field.
+   *
+   * 75 -> 75.00
+   */
+  function formatPrice(
+    value: string,
+    setter: (
+      value: string
+    ) => void
+  ) {
+
+    const amount =
+      parseMoney(value);
+
+
+    if (
+      amount !== null &&
+      amount > 0
+    ) {
+      setter(
+        amount.toFixed(2)
+      );
+    }
+  }
+
+
+  /*
+   * Load the current saved values every time Edit
+   * is opened.
    */
   function beginEdit() {
 
@@ -316,40 +353,108 @@ function JobDetails({
 
     setEditHourlyRate(
       job.hourlyRate !== undefined
-        ? String(job.hourlyRate)
+        ? job.hourlyRate.toFixed(2)
         : ""
     );
 
     setEditFixedPrice(
       job.fixedPrice !== undefined
-        ? String(job.fixedPrice)
+        ? job.fixedPrice.toFixed(2)
         : ""
     );
 
-    setEditError("");
+    clearValidationErrors();
 
     setIsEditing(true);
   }
 
+
   /*
-   * Save editable job information.
+   * Validate and save job edits.
    *
-   * Because we spread the existing job first,
-   * workSessions, status, and completedAt are
-   * preserved automatically.
+   * Existing work sessions and status are preserved
+   * because we spread the existing job first.
    */
   async function saveJob(
-    event: React.FormEvent<HTMLFormElement>
+    event:
+      React.FormEvent<HTMLFormElement>
   ) {
 
     event.preventDefault();
+
+    clearValidationErrors();
+
+
+    const description =
+      cleanMultilineText(
+        editDescription
+      );
+
+
+    let hasError = false;
+
+
+    if (!description) {
+
+      setDescriptionError(
+        "Enter what needs to be done."
+      );
+
+      hasError = true;
+    }
+
+
+    if (
+      !isValidDateInput(
+        editScheduledDate
+      )
+    ) {
+
+      setDateError(
+        "Choose a valid scheduled date."
+      );
+
+      hasError = true;
+    }
+
+
+    const priceValue =
+      editPricingType === "hourly"
+        ? editHourlyRate
+        : editFixedPrice;
+
+
+    if (
+      !isPositiveMoney(
+        priceValue
+      )
+    ) {
+
+      setPriceError(
+        editPricingType === "hourly"
+          ? "Enter an hourly rate greater than $0.00."
+          : "Enter a fixed price greater than $0.00."
+      );
+
+      hasError = true;
+    }
+
+
+    if (hasError) {
+      return;
+    }
+
+
+    const price =
+      parseMoney(
+        priceValue
+      )!;
 
 
     const updatedJob: Job = {
       ...job,
 
-      description:
-        editDescription.trim(),
+      description,
 
       scheduledDate:
         editScheduledDate,
@@ -362,15 +467,18 @@ function JobDetails({
         editPricingType,
 
       hourlyRate:
-        editPricingType === "hourly"
-          ? Number(editHourlyRate)
+        editPricingType ===
+        "hourly"
+          ? price
           : undefined,
 
       fixedPrice:
-        editPricingType === "fixed"
-          ? Number(editFixedPrice)
+        editPricingType ===
+        "fixed"
+          ? price
           : undefined,
     };
+
 
     try {
 
@@ -403,45 +511,27 @@ function JobDetails({
     }
   }
 
+
   /*
-   * Start Work and Resume Work use the same function.
-   *
-   * Every time work begins, create a NEW session.
-   *
-   * This means a job can span multiple days:
-   *
-   * Monday:
-   *   Start -> Pause
-   *
-   * Tuesday:
-   *   Resume -> Pause
-   *
-   * Wednesday:
-   *   Resume -> Pause -> Finish
+   * Start Work and Resume Work use the same operation:
+   * create a new open work session.
    */
   async function startWork() {
 
-    /*
-     * Do not accidentally create two running
-     * sessions at the same time.
-     */
     if (working) {
       return;
     }
 
 
-    const newSession: WorkSession = {
-      id: crypto.randomUUID(),
+    const newSession:
+      WorkSession = {
 
-      jobId: job.id,
+      id:
+        crypto.randomUUID(),
 
-      /*
-       * Exact event timestamps should use ISO/UTC.
-       *
-       * Unlike an invoice calendar date, timezone
-       * conversion is desirable here because elapsed
-       * time remains unambiguous.
-       */
+      jobId:
+        job.id,
+
       startedAt:
         new Date().toISOString(),
     };
@@ -459,7 +549,8 @@ function JobDetails({
 
         status: "active",
 
-        completedAt: undefined,
+        completedAt:
+          undefined,
 
         workSessions: [
           ...workSessions,
@@ -484,22 +575,21 @@ function JobDetails({
     }
   }
 
+
   /*
-   * Pause the currently running session.
-   *
-   * The job itself stays active because the overall
-   * job is not finished yet.
+   * Pause the currently open work session.
    */
   async function pauseWork() {
+
+    if (!working) {
+      return;
+    }
+
 
     const endedAt =
       new Date().toISOString();
 
-    /*
-     * Close whichever session is currently open.
-     *
-     * Normally there can only be one open session.
-     */
+
     const updatedSessions =
       workSessions.map(
         (session) => {
@@ -550,14 +640,19 @@ function JobDetails({
     }
   }
 
+
   /*
-   * Finish the overall job.
+   * Finish Job is intentionally separate from Pause.
    *
-   * Finish is only offered while work is paused.
-   * That makes "Pause Work" and "Finish Job"
-   * clearly different actions.
+   * The button is only available while the job is
+   * already paused.
    */
   async function completeJob() {
+
+    if (working) {
+      return;
+    }
+
 
     try {
 
@@ -592,6 +687,7 @@ function JobDetails({
     }
   }
 
+
   return (
     <>
       <header className="app-header">
@@ -608,12 +704,14 @@ function JobDetails({
           Job Details
         </h1>
 
+
         <div className="job-customer-header">
 
           <div className="job-customer-info">
 
             <button
               className="header-customer-link"
+
               onClick={() =>
                 onViewCustomer(
                   customer
@@ -623,11 +721,13 @@ function JobDetails({
               {customer.name}
             </button>
 
+
             <span className="header-customer-address">
               {customer.address}
             </span>
 
           </div>
+
 
           <span className="header-customer-job-count">
 
@@ -641,6 +741,7 @@ function JobDetails({
 
       </header>
 
+
       <section className="job-details-page">
 
         {isEditing ? (
@@ -648,13 +749,19 @@ function JobDetails({
           <form
             className="record-edit-form"
             onSubmit={saveJob}
+            noValidate
           >
 
             <div className="edit-form-heading">
-              <h2>Edit Job</h2>
+              <h2>
+                Edit Job
+              </h2>
             </div>
 
+
+            {/* Description */}
             <label>
+
               What needs to be done?
 
               <textarea
@@ -662,17 +769,40 @@ function JobDetails({
                   editDescription
                 }
 
-                onChange={(event) =>
+                onChange={(event) => {
+
                   setEditDescription(
                     event.currentTarget.value
+                  );
+
+                  if (
+                    descriptionError
+                  ) {
+                    setDescriptionError(
+                      ""
+                    );
+                  }
+                }}
+
+                aria-invalid={
+                  Boolean(
+                    descriptionError
                   )
                 }
-
-                required
               />
+
+              {descriptionError && (
+                <span className="form-error">
+                  {descriptionError}
+                </span>
+              )}
+
             </label>
 
+
+            {/* Date */}
             <label>
+
               Scheduled Date
 
               <input
@@ -682,17 +812,34 @@ function JobDetails({
                   editScheduledDate
                 }
 
-                onChange={(event) =>
+                onChange={(event) => {
+
                   setEditScheduledDate(
                     event.currentTarget.value
-                  )
-                }
+                  );
 
-                required
+                  if (dateError) {
+                    setDateError("");
+                  }
+                }}
+
+                aria-invalid={
+                  Boolean(dateError)
+                }
               />
+
+              {dateError && (
+                <span className="form-error">
+                  {dateError}
+                </span>
+              )}
+
             </label>
 
+
+            {/* Time */}
             <label>
+
               Scheduled Time
 
               <input
@@ -708,9 +855,13 @@ function JobDetails({
                   )
                 }
               />
+
             </label>
 
+
+            {/* Pricing type */}
             <label>
+
               Pricing
 
               <select
@@ -718,12 +869,18 @@ function JobDetails({
                   editPricingType
                 }
 
-                onChange={(event) =>
+                onChange={(event) => {
+
                   setEditPricingType(
-                    event.currentTarget.value as "hourly" | "fixed"
-                  )
-                }
+                    event.currentTarget.value as
+                      | "hourly"
+                      | "fixed"
+                  );
+
+                  setPriceError("");
+                }}
               >
+
                 <option value="hourly">
                   Hourly
                 </option>
@@ -731,89 +888,148 @@ function JobDetails({
                 <option value="fixed">
                   Fixed Price
                 </option>
+
               </select>
+
             </label>
 
-            {editPricingType === "hourly"
-              ? (
 
-                <label>
-                  Hourly Rate
+            {editPricingType ===
+            "hourly" ? (
 
-                  <div className="money-input">
+              <label>
 
-                    <span>$</span>
+                Hourly Rate
 
-                    <input
-                      type="number"
+                <div className="money-input">
 
-                      min="0"
+                  <span>
+                    $
+                  </span>
 
-                      step="0.01"
+                  <input
+                    type="number"
 
-                      inputMode="decimal"
+                    min="0.01"
 
-                      value={
-                        editHourlyRate
+                    step="0.01"
+
+                    inputMode="decimal"
+
+                    value={
+                      editHourlyRate
+                    }
+
+                    onChange={(event) => {
+
+                      setEditHourlyRate(
+                        event.currentTarget.value
+                      );
+
+                      if (priceError) {
+                        setPriceError("");
                       }
+                    }}
 
-                      onChange={(event) =>
-                        setEditHourlyRate(
-                          event.currentTarget.value
-                        )
+                    onBlur={() =>
+                      formatPrice(
+                        editHourlyRate,
+                        setEditHourlyRate
+                      )
+                    }
+
+                    aria-invalid={
+                      Boolean(
+                        priceError
+                      )
+                    }
+                  />
+
+                  <span>
+                    / hour
+                  </span>
+
+                </div>
+
+
+                {priceError && (
+                  <span className="form-error">
+                    {priceError}
+                  </span>
+                )}
+
+              </label>
+
+            ) : (
+
+              <label>
+
+                Fixed Job Price
+
+                <div className="money-input">
+
+                  <span>
+                    $
+                  </span>
+
+                  <input
+                    type="number"
+
+                    min="0.01"
+
+                    step="0.01"
+
+                    inputMode="decimal"
+
+                    value={
+                      editFixedPrice
+                    }
+
+                    onChange={(event) => {
+
+                      setEditFixedPrice(
+                        event.currentTarget.value
+                      );
+
+                      if (priceError) {
+                        setPriceError("");
                       }
+                    }}
 
-                      required
-                    />
+                    onBlur={() =>
+                      formatPrice(
+                        editFixedPrice,
+                        setEditFixedPrice
+                      )
+                    }
 
-                    <span>
-                      / hour
-                    </span>
+                    aria-invalid={
+                      Boolean(
+                        priceError
+                      )
+                    }
+                  />
 
-                  </div>
-                </label>
+                </div>
 
-              ) : (
 
-                <label>
-                  Fixed Job Price
+                {priceError && (
+                  <span className="form-error">
+                    {priceError}
+                  </span>
+                )}
 
-                  <div className="money-input">
+              </label>
 
-                    <span>$</span>
+            )}
 
-                    <input
-                      type="number"
-
-                      min="0"
-
-                      step="0.01"
-
-                      inputMode="decimal"
-
-                      value={
-                        editFixedPrice
-                      }
-
-                      onChange={(event) =>
-                        setEditFixedPrice(
-                          event.currentTarget.value
-                        )
-                      }
-
-                      required
-                    />
-
-                  </div>
-                </label>
-
-              )}
 
             {editError && (
               <p className="form-error">
                 {editError}
               </p>
             )}
+
 
             <div className="edit-actions">
 
@@ -827,13 +1043,15 @@ function JobDetails({
                   : "Save Changes"}
               </button>
 
+
               <button
                 className="secondary-button"
                 type="button"
 
-                onClick={() =>
-                  setIsEditing(false)
-                }
+                onClick={() => {
+                  clearValidationErrors();
+                  setIsEditing(false);
+                }}
 
                 disabled={isSaving}
               >
@@ -859,7 +1077,8 @@ function JobDetails({
 
                 <span
                   className={
-                    `job-status job-status-${job.status}`
+                    `job-status ` +
+                    `job-status-${job.status}`
                   }
                 >
                   {getStatusLabel()}
@@ -867,13 +1086,11 @@ function JobDetails({
 
               </div>
 
-              {/*
-               * This now reflects either the real
-               * schedule OR real work-session state.
-               */}
+
               <div className="job-time-callout">
                 {getTimeCallout()}
               </div>
+
 
               <div className="job-detail">
 
@@ -895,6 +1112,7 @@ function JobDetails({
 
               </div>
 
+
               <div className="job-detail">
 
                 <span className="job-detail-label">
@@ -903,9 +1121,11 @@ function JobDetails({
 
                 <span>
 
-                  {job.pricingType === "hourly"
+                  {job.pricingType ===
+                  "hourly"
 
-                    ? job.hourlyRate !== undefined
+                    ? job.hourlyRate !==
+                      undefined
 
                       ? `${formatMoney(
                           job.hourlyRate
@@ -913,7 +1133,8 @@ function JobDetails({
 
                       : "Hourly rate not entered"
 
-                    : job.fixedPrice !== undefined
+                    : job.fixedPrice !==
+                      undefined
 
                       ? `${formatMoney(
                           job.fixedPrice
@@ -925,12 +1146,8 @@ function JobDetails({
 
               </div>
 
-              {/*
-               * Time Worked appears once at least one
-               * work session exists.
-               */}
-              {workSessions.length > 0 && (
 
+              {workSessions.length > 0 && (
                 <div className="job-detail">
 
                   <span className="job-detail-label">
@@ -944,30 +1161,27 @@ function JobDetails({
                   </span>
 
                 </div>
-
               )}
 
-              {/*
-               * Show a labor total once it is meaningful.
-               *
-               * Fixed-price jobs always have a total.
-               * Hourly jobs need at least one session.
-               */}
-              {(job.fixedPrice !== undefined ||
-                (
-                  job.hourlyRate !== undefined &&
-                  workSessions.length > 0
-                )) && (
+
+              {(job.fixedPrice !==
+                undefined ||
+                (job.hourlyRate !==
+                  undefined &&
+                  workSessions.length >
+                    0)) && (
 
                 <div className="job-detail job-total-detail">
 
                   <span className="job-detail-label">
 
-                    {job.status === "completed"
+                    {job.status ===
+                    "completed"
                       ? "Job Total"
                       : "Current Labor Total"}
 
                   </span>
+
 
                   <strong>
                     {formatMoney(
@@ -979,6 +1193,7 @@ function JobDetails({
 
               )}
 
+
               <button
                 className="small-edit-button job-edit-button"
                 type="button"
@@ -989,16 +1204,17 @@ function JobDetails({
 
             </div>
 
+
             {editError && (
               <p className="form-error action-error">
                 {editError}
               </p>
             )}
 
-            {/*
-             * A job that has never been started.
-             */}
-            {job.status === "upcoming" && (
+
+            {/* New job */}
+            {job.status ===
+              "upcoming" && (
 
               <button
                 className="start-job-button"
@@ -1012,60 +1228,56 @@ function JobDetails({
 
             )}
 
-            {/*
-             * Work is currently running.
-             *
-             * Pausing closes the current work session
-             * but does NOT finish the overall job.
-             */}
-            {job.status === "active" &&
+
+            {/* Currently working */}
+            {job.status ===
+              "active" &&
               working && (
 
+              <button
+                className="complete-job-button"
+                onClick={pauseWork}
+                disabled={isSaving}
+              >
+                {isSaving
+                  ? "Saving..."
+                  : "Pause Work"}
+              </button>
+
+            )}
+
+
+            {/* Paused */}
+            {job.status ===
+              "active" &&
+              !working && (
+
+              <div className="edit-actions">
+
                 <button
-                  className="complete-job-button"
-                  onClick={pauseWork}
+                  className="start-job-button"
+                  onClick={startWork}
                   disabled={isSaving}
                 >
                   {isSaving
                     ? "Saving..."
-                    : "Pause Work"}
+                    : "Resume Work"}
                 </button>
 
-              )}
 
-            {/*
-             * The overall job is still active, but
-             * Dad is not currently working on it.
-             *
-             * He can either start another work session
-             * or declare the whole job complete.
-             */}
-            {job.status === "active" &&
-              !working && (
+                <button
+                  className="complete-job-button"
+                  onClick={completeJob}
+                  disabled={isSaving}
+                >
+                  {isSaving
+                    ? "Saving..."
+                    : "Finish Job"}
+                </button>
 
-                <div className="job-work-actions">
+              </div>
 
-                  <button
-                    className="start-job-button"
-                    onClick={startWork}
-                    disabled={isSaving}
-                  >
-                    {isSaving
-                      ? "Saving..."
-                      : "Resume Work"}
-                  </button>
-
-                  <button
-                    className="complete-job-button"
-                    onClick={completeJob}
-                    disabled={isSaving}
-                  >
-                    Finish Job
-                  </button>
-
-                </div>
-
-              )}
+            )}
 
           </>
 

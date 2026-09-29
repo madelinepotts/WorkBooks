@@ -1,3 +1,5 @@
+import type { WorkSession } from "./WorkSession";
+
 export type Job = {
   id: string;
   customerId: string;
@@ -14,7 +16,7 @@ export type Job = {
   hourlyRate?: number;
   fixedPrice?: number;
 
-   /*
+  /*
    * A completed job still needs a final completion
    * timestamp even though its work is stored as sessions.
    */

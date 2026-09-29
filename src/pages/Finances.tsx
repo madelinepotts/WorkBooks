@@ -13,6 +13,18 @@ import {
   getWorkedHours,
 } from "../utils/jobTime";
 import { useNow } from "../utils/useNow";
+import {
+  cleanEmail,
+  cleanMultilineText,
+  cleanText,
+  formatPhone,
+  isDateOnOrAfter,
+  isPositiveMoney,
+  isValidDateInput,
+  isValidEmail,
+  isValidPhone,
+  parseMoney,
+} from "../utils/formValidation";
 
 
 type FinancesProps = {
@@ -43,6 +55,7 @@ type FinancesProps = {
   ) => Promise<void>;
 };
 
+
 function Finances({
   customers,
   jobs,
@@ -55,6 +68,7 @@ function Finances({
 }: FinancesProps) {
   const now = useNow();
 
+
   /*
    * Invoice creation state.
    */
@@ -66,6 +80,7 @@ function Finances({
 
   const [dueDate, setDueDate] =
     useState("");
+
 
   /*
    * Only one invoice is edited at a time to keep the page simple.
@@ -90,6 +105,16 @@ function Finances({
 
   const [invoiceError, setInvoiceError] =
     useState("");
+
+  const [invoiceJobError, setInvoiceJobError] =
+    useState("");
+
+  const [invoiceDueDateError, setInvoiceDueDateError] =
+    useState("");
+
+  const [invoiceAmountError, setInvoiceAmountError] =
+    useState("");
+
 
   /*
    * Business information used at the top of every generated PDF invoice.
@@ -121,6 +146,18 @@ function Finances({
   const [businessInfoError, setBusinessInfoError] =
     useState("");
 
+  const [businessNameError, setBusinessNameError] =
+    useState("");
+
+  const [businessPhoneError, setBusinessPhoneError] =
+    useState("");
+
+  const [businessEmailError, setBusinessEmailError] =
+    useState("");
+
+  const [businessAddressError, setBusinessAddressError] =
+    useState("");
+
   const [isSavingBusinessInfo, setIsSavingBusinessInfo] =
     useState(false);
 
@@ -140,6 +177,7 @@ function Finances({
   const invoicedJobIds = new Set(
     invoices.map((invoice) => invoice.jobId)
   );
+
 
   /*
    * Jobs that can be turned into invoices.
@@ -202,6 +240,7 @@ function Finances({
       return bDate.localeCompare(aDate);
     });
 
+
   const selectedJob =
     getJob(selectedJobId);
 
@@ -213,6 +252,7 @@ function Finances({
     ? getJobAmount(selectedJob, now)
     : 0;
 
+
   /*
    * Used to explain the labor calculation when Dad
    * is creating an hourly invoice.
@@ -223,6 +263,7 @@ function Finances({
       ? getWorkedHours(selectedJob, now)
       : 0;
 
+
   /*
    * Finance summary values come from saved invoices rather than temporary
    * UI values, so they remain correct after restarting the app.
@@ -232,6 +273,7 @@ function Finances({
     0
   );
 
+
   const totalPaid = invoices
     .filter(
       (invoice) => invoice.status === "paid"
@@ -240,6 +282,7 @@ function Finances({
       (sum, invoice) => sum + invoice.amount,
       0
     );
+
 
   const outstanding = invoices
     .filter(
@@ -262,6 +305,7 @@ function Finances({
         sum + getJobAmount(job, now),
       0
     );
+
 
   /*
    * There is only one set of business information for WorkBooks.
@@ -293,8 +337,13 @@ function Finances({
     );
 
     setBusinessInfoError("");
+    setBusinessNameError("");
+    setBusinessPhoneError("");
+    setBusinessEmailError("");
+    setBusinessAddressError("");
     setIsEditingBusinessInfo(true);
   }
+
 
   /*
    * Save the invoice header/payment information in SQLite.
@@ -304,19 +353,79 @@ function Finances({
   ) {
     event.preventDefault();
 
+    setBusinessInfoError("");
+    setBusinessNameError("");
+    setBusinessPhoneError("");
+    setBusinessEmailError("");
+    setBusinessAddressError("");
+
+    const cleanedBusinessName =
+      cleanText(businessName);
+
+    const cleanedOwnerName =
+      cleanText(ownerName);
+
+    const cleanedPhone =
+      formatPhone(businessPhone);
+
+    const cleanedEmail =
+      cleanEmail(businessEmail);
+
+    const cleanedAddress =
+      cleanMultilineText(businessAddress);
+
+    const cleanedPaymentInstructions =
+      cleanMultilineText(paymentInstructions);
+
+    let hasError = false;
+
+    if (!cleanedBusinessName) {
+      setBusinessNameError(
+        "Enter the business name."
+      );
+      hasError = true;
+    }
+
+    if (!isValidPhone(businessPhone)) {
+      setBusinessPhoneError(
+        "Enter a 10-digit phone number."
+      );
+      hasError = true;
+    }
+
+    if (
+      cleanedEmail &&
+      !isValidEmail(cleanedEmail)
+    ) {
+      setBusinessEmailError(
+        "Enter a valid email address."
+      );
+      hasError = true;
+    }
+
+    if (!cleanedAddress) {
+      setBusinessAddressError(
+        "Enter the business address."
+      );
+      hasError = true;
+    }
+
+    if (hasError) {
+      return;
+    }
+
     const updatedBusinessInfo: BusinessInfo = {
-      businessName: businessName.trim(),
-      ownerName: ownerName.trim(),
-      phone: businessPhone.trim(),
-      email: businessEmail.trim(),
-      address: businessAddress.trim(),
+      businessName: cleanedBusinessName,
+      ownerName: cleanedOwnerName,
+      phone: cleanedPhone,
+      email: cleanedEmail,
+      address: cleanedAddress,
       paymentInstructions:
-        paymentInstructions.trim(),
+        cleanedPaymentInstructions,
     };
 
     try {
       setIsSavingBusinessInfo(true);
-      setBusinessInfoError("");
 
       await onUpdateBusinessInfo(
         updatedBusinessInfo
@@ -339,6 +448,7 @@ function Finances({
     }
   }
 
+
   /*
    * Create a new invoice and wait for SQLite to accept it before
    * closing the form.
@@ -348,11 +458,47 @@ function Finances({
   ) {
     event.preventDefault();
 
-    if (
-      !selectedJob ||
-      !selectedCustomer ||
-      !dueDate
+    setInvoiceError("");
+    setInvoiceJobError("");
+    setInvoiceDueDateError("");
+
+    const createdAt =
+      new Date().toLocaleDateString("en-CA");
+
+    let hasError = false;
+
+    if (!selectedJob || !selectedCustomer) {
+      setInvoiceJobError(
+        "Choose a completed job to invoice."
+      );
+      hasError = true;
+    }
+
+    if (!isValidDateInput(dueDate)) {
+      setInvoiceDueDateError(
+        "Choose a valid due date."
+      );
+      hasError = true;
+    } else if (
+      !isDateOnOrAfter(
+        dueDate,
+        createdAt
+      )
     ) {
+      setInvoiceDueDateError(
+        "Due date cannot be before the invoice date."
+      );
+      hasError = true;
+    }
+
+    if (selectedJob && selectedAmount <= 0) {
+      setInvoiceError(
+        "The invoice total must be greater than $0.00."
+      );
+      hasError = true;
+    }
+
+    if (hasError || !selectedJob || !selectedCustomer) {
       return;
     }
 
@@ -362,15 +508,15 @@ function Finances({
         `INV-${String(invoices.length + 1).padStart(4, "0")}`,
       customerId: selectedCustomer.id,
       jobId: selectedJob.id,
-      createdAt: new Date().toLocaleDateString("en-CA"),
+      createdAt,
       dueDate,
       amount: selectedAmount,
       status: "draft",
     };
 
+
     try {
       setSavingInvoiceId(invoice.id);
-      setInvoiceError("");
 
       await onCreateInvoice(invoice);
 
@@ -393,6 +539,7 @@ function Finances({
     }
   }
 
+
   /*
    * Fill the invoice edit form from the current saved invoice.
    */
@@ -400,11 +547,14 @@ function Finances({
     invoice: Invoice
   ) {
     setEditingInvoiceId(invoice.id);
-    setEditAmount(String(invoice.amount));
+    setEditAmount(invoice.amount.toFixed(2));
     setEditDueDate(invoice.dueDate);
     setEditStatus(invoice.status);
     setInvoiceError("");
+    setInvoiceAmountError("");
+    setInvoiceDueDateError("");
   }
+
 
   /*
    * Invoice numbers and their customer/job links stay fixed after
@@ -416,9 +566,49 @@ function Finances({
   ) {
     event.preventDefault();
 
+    setInvoiceError("");
+    setInvoiceAmountError("");
+    setInvoiceDueDateError("");
+
+    const amount =
+      parseMoney(editAmount);
+
+    let hasError = false;
+
+    if (
+      amount === null ||
+      !isPositiveMoney(editAmount)
+    ) {
+      setInvoiceAmountError(
+        "Enter an amount greater than $0.00."
+      );
+      hasError = true;
+    }
+
+    if (!isValidDateInput(editDueDate)) {
+      setInvoiceDueDateError(
+        "Choose a valid due date."
+      );
+      hasError = true;
+    } else if (
+      !isDateOnOrAfter(
+        editDueDate,
+        invoice.createdAt
+      )
+    ) {
+      setInvoiceDueDateError(
+        "Due date cannot be before the invoice date."
+      );
+      hasError = true;
+    }
+
+    if (hasError || amount === null) {
+      return;
+    }
+
     const updatedInvoice: Invoice = {
       ...invoice,
-      amount: Number(editAmount),
+      amount,
       dueDate: editDueDate,
       status: editStatus,
     };
@@ -426,7 +616,6 @@ function Finances({
 
     try {
       setSavingInvoiceId(invoice.id);
-      setInvoiceError("");
 
       await onUpdateInvoice(updatedInvoice);
 
@@ -446,6 +635,7 @@ function Finances({
       setSavingInvoiceId(null);
     }
   }
+
 
   /*
    * Quick status buttons use the smaller status endpoint.
@@ -478,6 +668,7 @@ function Finances({
     }
   }
 
+
   /*
    * Ask the backend for a fresh PDF made from the current database data.
    * The browser/Tauri webview then downloads it like a normal file.
@@ -506,6 +697,7 @@ function Finances({
     }
   }
 
+
   const hasBusinessInfo = Boolean(
     businessInfo.businessName ||
     businessInfo.ownerName ||
@@ -515,6 +707,7 @@ function Finances({
     businessInfo.paymentInstructions
   );
 
+
   return (
     <>
       <header className="app-header">
@@ -523,6 +716,7 @@ function Finances({
           Invoices, payments, and money still owed.
         </p>
       </header>
+
 
       <section className="finances-page">
 
@@ -557,6 +751,7 @@ function Finances({
           </div>
         </div>
 
+
         {/*
          * Saved information printed on PDF invoices.
          */}
@@ -582,24 +777,36 @@ function Finances({
             )}
           </div>
 
+
           {isEditingBusinessInfo ? (
             <form
               className="record-edit-form invoice-business-form"
               onSubmit={saveBusinessInfo}
+              noValidate
             >
               <label>
                 Business Name
                 <input
                   type="text"
                   value={businessName}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setBusinessName(
                       event.currentTarget.value
-                    )
-                  }
+                    );
+                    if (businessNameError) {
+                      setBusinessNameError("");
+                    }
+                  }}
                   placeholder="Smith Handyman Services"
+                  aria-invalid={Boolean(businessNameError)}
                 />
+                {businessNameError && (
+                  <span className="form-error">
+                    {businessNameError}
+                  </span>
+                )}
               </label>
+
 
               <label>
                 Owner Name
@@ -615,43 +822,90 @@ function Finances({
                 />
               </label>
 
+
               <label>
                 Phone
                 <input
                   type="tel"
                   value={businessPhone}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setBusinessPhone(
                       event.currentTarget.value
-                    )
-                  }
+                    );
+                    if (businessPhoneError) {
+                      setBusinessPhoneError("");
+                    }
+                  }}
+                  onBlur={() => {
+                    if (isValidPhone(businessPhone)) {
+                      setBusinessPhone(
+                        formatPhone(businessPhone)
+                      );
+                    }
+                  }}
+                  placeholder="(801) 555-1234"
+                  inputMode="tel"
+                  aria-invalid={Boolean(businessPhoneError)}
                 />
+                {businessPhoneError && (
+                  <span className="form-error">
+                    {businessPhoneError}
+                  </span>
+                )}
               </label>
+
 
               <label>
                 Email
                 <input
                   type="email"
                   value={businessEmail}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setBusinessEmail(
                       event.currentTarget.value
+                    );
+                    if (businessEmailError) {
+                      setBusinessEmailError("");
+                    }
+                  }}
+                  onBlur={() =>
+                    setBusinessEmail(
+                      cleanEmail(businessEmail)
                     )
                   }
+                  placeholder="Optional"
+                  inputMode="email"
+                  aria-invalid={Boolean(businessEmailError)}
                 />
+                {businessEmailError && (
+                  <span className="form-error">
+                    {businessEmailError}
+                  </span>
+                )}
               </label>
+
 
               <label>
                 Business Address
                 <textarea
                   value={businessAddress}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setBusinessAddress(
                       event.currentTarget.value
-                    )
-                  }
+                    );
+                    if (businessAddressError) {
+                      setBusinessAddressError("");
+                    }
+                  }}
+                  aria-invalid={Boolean(businessAddressError)}
                 />
+                {businessAddressError && (
+                  <span className="form-error">
+                    {businessAddressError}
+                  </span>
+                )}
               </label>
+
 
               <label>
                 Payment Instructions
@@ -689,9 +943,14 @@ function Finances({
                 <button
                   className="secondary-button"
                   type="button"
-                  onClick={() =>
-                    setIsEditingBusinessInfo(false)
-                  }
+                  onClick={() => {
+                    setBusinessInfoError("");
+                    setBusinessNameError("");
+                    setBusinessPhoneError("");
+                    setBusinessEmailError("");
+                    setBusinessAddressError("");
+                    setIsEditingBusinessInfo(false);
+                  }}
                   disabled={isSavingBusinessInfo}
                 >
                   Cancel
@@ -741,10 +1000,13 @@ function Finances({
           )}
         </div>
 
+
         <button
           className="new-customer-button"
           onClick={() => {
             setInvoiceError("");
+            setInvoiceJobError("");
+            setInvoiceDueDateError("");
             setShowInvoiceForm(
               (current) => !current
             );
@@ -755,10 +1017,12 @@ function Finances({
             : "+ Create Invoice"}
         </button>
 
+
         {showInvoiceForm && (
           <form
             className="invoice-form"
             onSubmit={createInvoice}
+            noValidate
           >
             <h2>Create Invoice</h2>
 
@@ -767,12 +1031,13 @@ function Finances({
               Job
               <select
                 value={selectedJobId}
-                onChange={(event) =>
+                onChange={(event) => {
                   setSelectedJobId(
                     event.currentTarget.value
-                  )
-                }
-                required
+                  );
+                  setInvoiceJobError("");
+                }}
+                aria-invalid={Boolean(invoiceJobError)}
               >
                 <option value="">
                   Choose a job...
@@ -794,7 +1059,13 @@ function Finances({
                   );
                 })}
               </select>
+              {invoiceJobError && (
+                <span className="form-error">
+                  {invoiceJobError}
+                </span>
+              )}
             </label>
+
 
             {selectedJob && selectedCustomer && (
               <div className="invoice-preview">
@@ -843,25 +1114,35 @@ function Finances({
               </div>
             )}
 
+
             <label>
               Due Date
               <input
                 type="date"
                 value={dueDate}
-                onChange={(event) =>
+                onChange={(event) => {
                   setDueDate(
                     event.currentTarget.value
-                  )
-                }
-                required
+                  );
+                  setInvoiceDueDateError("");
+                }}
+                min={new Date().toLocaleDateString("en-CA")}
+                aria-invalid={Boolean(invoiceDueDateError)}
               />
+              {invoiceDueDateError && (
+                <span className="form-error">
+                  {invoiceDueDateError}
+                </span>
+              )}
             </label>
+
 
             {invoiceError && (
               <p className="form-error">
                 {invoiceError}
               </p>
             )}
+
 
             <button
               className="new-customer-button"
@@ -875,6 +1156,7 @@ function Finances({
           </form>
         )}
 
+
         <div className="finance-section">
           <div className="section-heading">
             <h2>Invoices</h2>
@@ -887,6 +1169,7 @@ function Finances({
               {invoiceError}
             </p>
           )}
+
 
           {invoices.length === 0 ? (
             <div className="empty-state">
@@ -918,6 +1201,7 @@ function Finances({
                   const isDownloading =
                     downloadingInvoiceId === invoice.id;
 
+
                   return (
                     <div
                       className="invoice-card"
@@ -927,6 +1211,7 @@ function Finances({
                       {isEditing ? (
                         <form
                           className="invoice-edit-form"
+                          noValidate
                           onSubmit={(event) =>
                             saveInvoiceEdit(
                               event,
@@ -947,39 +1232,61 @@ function Finances({
                             </div>
                           </div>
 
+
                           <label>
                             Amount
                             <div className="money-input">
                               <span>$</span>
                               <input
                                 type="number"
-                                min="0"
+                                min="0.01"
                                 step="0.01"
                                 inputMode="decimal"
                                 value={editAmount}
-                                onChange={(event) =>
+                                onChange={(event) => {
                                   setEditAmount(
                                     event.currentTarget.value
-                                  )
-                                }
-                                required
+                                  );
+                                  setInvoiceAmountError("");
+                                }}
+                                onBlur={() => {
+                                  const amount = parseMoney(editAmount);
+                                  if (amount !== null && amount > 0) {
+                                    setEditAmount(amount.toFixed(2));
+                                  }
+                                }}
+                                aria-invalid={Boolean(invoiceAmountError)}
                               />
                             </div>
+                            {invoiceAmountError && (
+                              <span className="form-error">
+                                {invoiceAmountError}
+                              </span>
+                            )}
                           </label>
+
 
                           <label>
                             Due Date
                             <input
                               type="date"
                               value={editDueDate}
-                              onChange={(event) =>
+                              onChange={(event) => {
                                 setEditDueDate(
                                   event.currentTarget.value
-                                )
-                              }
-                              required
+                                );
+                                setInvoiceDueDateError("");
+                              }}
+                              min={invoice.createdAt}
+                              aria-invalid={Boolean(invoiceDueDateError)}
                             />
+                            {invoiceDueDateError && (
+                              <span className="form-error">
+                                {invoiceDueDateError}
+                              </span>
+                            )}
                           </label>
+
 
                           <label>
                             Status
@@ -1003,6 +1310,7 @@ function Finances({
                             </select>
                           </label>
 
+
                           <div className="edit-actions compact-edit-actions">
                             <button
                               className="new-customer-button"
@@ -1017,9 +1325,12 @@ function Finances({
                             <button
                               className="secondary-button"
                               type="button"
-                              onClick={() =>
-                                setEditingInvoiceId(null)
-                              }
+                              onClick={() => {
+                                setInvoiceError("");
+                                setInvoiceAmountError("");
+                                setInvoiceDueDateError("");
+                                setEditingInvoiceId(null);
+                              }}
                               disabled={isSaving}
                             >
                               Cancel
@@ -1047,6 +1358,7 @@ function Finances({
                             </strong>
                           </div>
 
+
                           <p>
                             {job?.description ?? "Job"}
                           </p>
@@ -1054,6 +1366,7 @@ function Finances({
                           <p>
                             Due {invoice.dueDate}
                           </p>
+
 
                           <div className="invoice-status-row">
                             <span
@@ -1063,6 +1376,7 @@ function Finances({
                             >
                               {invoice.status}
                             </span>
+
 
                             <button
                               type="button"
@@ -1079,6 +1393,7 @@ function Finances({
                                 : "Download PDF"}
                             </button>
 
+
                             <button
                               type="button"
                               onClick={() =>
@@ -1091,6 +1406,7 @@ function Finances({
                             >
                               Edit
                             </button>
+
 
                             {invoice.status === "draft" && (
                               <button
@@ -1109,6 +1425,7 @@ function Finances({
                                 Mark Sent
                               </button>
                             )}
+
 
                             {invoice.status !== "paid" && (
                               <button
@@ -1143,5 +1460,6 @@ function Finances({
     </>
   );
 }
+
 
 export default Finances;

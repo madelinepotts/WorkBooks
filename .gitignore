@@ -25,3 +25,11 @@ dist-ssr
 
 # backend pycache
 backend/__pycache__
+
+# Release/build artifacts
+build-release/
+workbooks-backend.spec
+src-tauri/binaries/workbooks-backend-*.exe
+
+# build directory
+build/*

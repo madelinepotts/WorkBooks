@@ -1,8 +1,5 @@
 import sqlite3
-from pathlib import Path
-
-
-DATABASE_PATH = Path(__file__).parent / "workbooks.db"
+from backend.app_paths import DATABASE_PATH
 
 
 def get_db_connection():

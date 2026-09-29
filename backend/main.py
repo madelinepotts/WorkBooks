@@ -1,3 +1,4 @@
+import math
 import re
 import sqlite3
 from datetime import datetime
@@ -29,7 +30,7 @@ from backend.database import create_database, get_db_connection
 # Generated invoice PDFs are saved beside the backend code. SQLite remains
 # the source of truth; downloading an invoice regenerates this copy using the
 # current saved invoice/customer/business information.
-INVOICE_PDF_DIR = Path(__file__).parent / "invoices"
+from backend.app_paths import INVOICE_PDF_DIR
 
 
 app = FastAPI()
@@ -42,6 +43,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:1420",
         "http://127.0.0.1:1420",
+        "http://tauri.localhost",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -116,6 +118,397 @@ class InvoiceStatusUpdate(BaseModel):
 ########################
 ### Helper functions ###
 ########################
+
+_EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _clean_text(value: str) -> str:
+    """Trim surrounding whitespace and collapse repeated whitespace."""
+    return re.sub(r"\s+", " ", value.strip())
+
+
+def _clean_multiline_text(value: str) -> str:
+    """Clean each line while preserving intentional line breaks."""
+    cleaned_lines = []
+
+    for line in value.splitlines():
+        cleaned = re.sub(r"[ \t]+", " ", line.strip())
+        if cleaned:
+            cleaned_lines.append(cleaned)
+
+    return "\n".join(cleaned_lines)
+
+
+def _require_id(value: str, label: str) -> str:
+    """Require a non-empty identifier without changing its meaning."""
+    cleaned = value.strip()
+
+    if not cleaned:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} is required.",
+        )
+
+    return cleaned
+
+
+def _normalize_phone(value: str, label: str = "Phone") -> str:
+    """
+    Accept common US phone-number input and save one consistent format.
+
+    Examples accepted:
+        8015551234
+        801-555-1234
+        (801) 555-1234
+        1-801-555-1234
+    """
+    digits = re.sub(r"\D", "", value)
+
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+
+    if len(digits) != 10:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} must contain a 10-digit US phone number.",
+        )
+
+    return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+
+
+def _normalize_email(value: str | None, label: str = "Email") -> str | None:
+    """Trim/lowercase an optional email and reject malformed values."""
+    if value is None:
+        return None
+
+    cleaned = value.strip().lower()
+
+    if not cleaned:
+        return None
+
+    if not _EMAIL_PATTERN.fullmatch(cleaned):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} is not a valid email address.",
+        )
+
+    return cleaned
+
+
+def _validate_date(value: str, label: str) -> str:
+    """Require an actual calendar date in YYYY-MM-DD format."""
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} must be a valid date in YYYY-MM-DD format.",
+        ) from error
+
+    return value
+
+
+def _normalize_time(value: str | None, label: str) -> str | None:
+    """Validate an optional 24-hour HTML time value and normalize to HH:MM."""
+    if value is None:
+        return None
+
+    cleaned = value.strip()
+
+    if not cleaned:
+        return None
+
+    for time_format in ("%H:%M", "%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(cleaned, time_format)
+            return parsed.strftime("%H:%M")
+        except ValueError:
+            pass
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"{label} must be a valid time.",
+    )
+
+
+def _parse_timestamp(value: str, label: str) -> datetime:
+    """Validate an ISO timestamp used for work-session timing."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} must be a valid ISO date/time.",
+        ) from error
+
+
+def _positive_money(value: float | None, label: str) -> float:
+    """Require a finite amount greater than zero and normalize to cents."""
+    if value is None or not math.isfinite(value) or value <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} must be greater than $0.00.",
+        )
+
+    return round(value, 2)
+
+
+def _normalize_customer(customer: Customer) -> Customer:
+    """Clean and validate one customer before any database write."""
+    customer_id = _require_id(customer.id, "Customer ID")
+    name = _clean_text(customer.name)
+    address = _clean_multiline_text(customer.address)
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer name is required.",
+        )
+
+    if not address:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer address is required.",
+        )
+
+    return customer.model_copy(
+        update={
+            "id": customer_id,
+            "name": name,
+            "phone": _normalize_phone(customer.phone),
+            "email": _normalize_email(customer.email),
+            "address": address,
+        }
+    )
+
+
+def _normalize_business_info(business_info: BusinessInfo) -> BusinessInfo:
+    """Clean and validate the information printed on invoices."""
+    business_name = _clean_text(business_info.businessName)
+    address = _clean_multiline_text(business_info.address)
+
+    if not business_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Business name is required.",
+        )
+
+    if not address:
+        raise HTTPException(
+            status_code=400,
+            detail="Business address is required.",
+        )
+
+    return business_info.model_copy(
+        update={
+            "businessName": business_name,
+            "ownerName": _clean_text(business_info.ownerName),
+            "phone": _normalize_phone(business_info.phone, "Business phone"),
+            "email": _normalize_email(business_info.email, "Business email") or "",
+            "address": address,
+            "paymentInstructions": _clean_multiline_text(
+                business_info.paymentInstructions
+            ),
+        }
+    )
+
+
+def _normalize_work_sessions(job: Job) -> list[WorkSession]:
+    """Validate all work sessions supplied with a job update."""
+    normalized_sessions: list[WorkSession] = []
+    session_ids: set[str] = set()
+    open_session_count = 0
+
+    for session in job.workSessions:
+        session_id = _require_id(session.id, "Work-session ID")
+        session_job_id = _require_id(session.jobId, "Work-session job ID")
+
+        if session_job_id != job.id:
+            raise HTTPException(
+                status_code=400,
+                detail="Work session jobId does not match the job being updated.",
+            )
+
+        if session_id in session_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="A job cannot contain duplicate work-session IDs.",
+            )
+
+        session_ids.add(session_id)
+
+        started_at = session.startedAt.strip()
+        started = _parse_timestamp(started_at, "Work-session start time")
+
+        ended_at = None
+
+        if session.endedAt is not None and session.endedAt.strip():
+            ended_at = session.endedAt.strip()
+            ended = _parse_timestamp(ended_at, "Work-session end time")
+
+            # ISO strings generated by WorkBooks are timezone-aware. If an old
+            # record is naive, compare wall-clock values rather than crashing.
+            if started.tzinfo is None:
+                started_compare = started.replace(tzinfo=None)
+            else:
+                started_compare = started
+
+            if ended.tzinfo is None:
+                ended_compare = ended.replace(tzinfo=None)
+            else:
+                ended_compare = ended
+
+            try:
+                backwards = ended_compare < started_compare
+            except TypeError:
+                backwards = ended.replace(tzinfo=None) < started.replace(tzinfo=None)
+
+            if backwards:
+                raise HTTPException(
+                    status_code=400,
+                    detail="A work session cannot end before it starts.",
+                )
+        else:
+            open_session_count += 1
+
+        normalized_sessions.append(
+            session.model_copy(
+                update={
+                    "id": session_id,
+                    "jobId": session_job_id,
+                    "startedAt": started_at,
+                    "endedAt": ended_at,
+                }
+            )
+        )
+
+    if open_session_count > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="A job cannot have more than one open work session.",
+        )
+
+    return normalized_sessions
+
+
+def _normalize_job(job: Job) -> Job:
+    """Clean and validate a job before it reaches SQLite."""
+    job_id = _require_id(job.id, "Job ID")
+    customer_id = _require_id(job.customerId, "Customer ID")
+    description = _clean_multiline_text(job.description)
+
+    if not description:
+        raise HTTPException(
+            status_code=400,
+            detail="Job description is required.",
+        )
+
+    scheduled_date = _validate_date(job.scheduledDate, "Scheduled date")
+    scheduled_time = _normalize_time(job.scheduledTime, "Scheduled time")
+
+    if job.pricingType == "hourly":
+        hourly_rate = _positive_money(job.hourlyRate, "Hourly rate")
+        fixed_price = None
+    else:
+        fixed_price = _positive_money(job.fixedPrice, "Fixed price")
+        hourly_rate = None
+
+    completed_at = None
+
+    if job.completedAt is not None and job.completedAt.strip():
+        completed_at = job.completedAt.strip()
+        _parse_timestamp(completed_at, "Completed time")
+
+    normalized_job = job.model_copy(
+        update={
+            "id": job_id,
+            "customerId": customer_id,
+            "description": description,
+            "scheduledDate": scheduled_date,
+            "scheduledTime": scheduled_time,
+            "hourlyRate": hourly_rate,
+            "fixedPrice": fixed_price,
+            "completedAt": completed_at,
+        }
+    )
+
+    work_sessions = _normalize_work_sessions(normalized_job)
+
+    if normalized_job.status == "upcoming":
+        if work_sessions:
+            raise HTTPException(
+                status_code=400,
+                detail="An upcoming job cannot already contain work sessions.",
+            )
+
+        if completed_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="An upcoming job cannot have a completion time.",
+            )
+
+    elif normalized_job.status == "active":
+        if completed_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="An active job cannot have a completion time.",
+            )
+
+    elif normalized_job.status == "completed":
+        if completed_at is None:
+            raise HTTPException(
+                status_code=400,
+                detail="A completed job must have a completion time.",
+            )
+
+        if any(session.endedAt is None for session in work_sessions):
+            raise HTTPException(
+                status_code=400,
+                detail="Finish or pause the open work session before completing the job.",
+            )
+
+    return normalized_job.model_copy(
+        update={
+            "workSessions": work_sessions,
+        }
+    )
+
+
+def _normalize_invoice(invoice: Invoice) -> Invoice:
+    """Validate invoice dates, identifiers, number, and amount."""
+    invoice_id = _require_id(invoice.id, "Invoice ID")
+    customer_id = _require_id(invoice.customerId, "Customer ID")
+    job_id = _require_id(invoice.jobId, "Job ID")
+    invoice_number = _clean_text(invoice.invoiceNumber)
+
+    if not invoice_number:
+        raise HTTPException(
+            status_code=400,
+            detail="Invoice number is required.",
+        )
+
+    created_at = _validate_date(invoice.createdAt, "Invoice date")
+    due_date = _validate_date(invoice.dueDate, "Due date")
+
+    if due_date < created_at:
+        raise HTTPException(
+            status_code=400,
+            detail="Due date cannot be before the invoice date.",
+        )
+
+    amount = _positive_money(invoice.amount, "Invoice amount")
+
+    return invoice.model_copy(
+        update={
+            "id": invoice_id,
+            "invoiceNumber": invoice_number,
+            "customerId": customer_id,
+            "jobId": job_id,
+            "createdAt": created_at,
+            "dueDate": due_date,
+            "amount": amount,
+        }
+    )
 
 def _serialize_work_session(row: sqlite3.Row) -> dict:
     """Convert one work_sessions row into the frontend WorkSession shape."""
@@ -600,6 +993,7 @@ def startup_event():
 
 @app.post("/customers")
 def create_customer(customer: Customer):
+    customer = _normalize_customer(customer)
     connection = get_db_connection()
 
     try:
@@ -639,6 +1033,7 @@ def create_customer(customer: Customer):
 
 @app.post("/jobs")
 def create_job(job: Job):
+    job = _normalize_job(job)
     connection = get_db_connection()
 
     try:
@@ -708,6 +1103,7 @@ def create_job(job: Job):
 
 @app.post("/invoices")
 def create_invoice(invoice: Invoice):
+    invoice = _normalize_invoice(invoice)
     connection = get_db_connection()
 
     try:
@@ -719,7 +1115,7 @@ def create_invoice(invoice: Invoice):
 
         job_row = connection.execute(
             """
-            SELECT customerId
+            SELECT customerId, status
             FROM jobs
             WHERE id = ?
             """,
@@ -738,6 +1134,12 @@ def create_invoice(invoice: Invoice):
             raise HTTPException(
                 status_code=400,
                 detail="Invoice customer does not match the job customer.",
+            )
+
+        if job_row["status"] != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail="Only completed jobs can be invoiced.",
             )
 
         connection.execute(
@@ -790,6 +1192,7 @@ def create_invoice(invoice: Invoice):
 @app.put("/business-info")
 def update_business_info(business_info: BusinessInfo):
     """Save the business information printed on generated invoices."""
+    business_info = _normalize_business_info(business_info)
     connection = get_db_connection()
 
     try:
@@ -838,6 +1241,7 @@ def update_customer(customer_id: str, customer: Customer):
             detail="Customer ID in the URL does not match the customer body.",
         )
 
+    customer = _normalize_customer(customer)
     connection = get_db_connection()
 
     try:
@@ -889,6 +1293,7 @@ def update_job(job_id: str, job: Job):
             detail="Job ID in the URL does not match the job body.",
         )
 
+    job = _normalize_job(job)
     connection = get_db_connection()
 
     try:
@@ -976,6 +1381,7 @@ def update_invoice(invoice_id: str, invoice: Invoice):
             detail="Invoice ID in the URL does not match the invoice body.",
         )
 
+    invoice = _normalize_invoice(invoice)
     connection = get_db_connection()
 
     try:
