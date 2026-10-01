@@ -1,4 +1,5 @@
 import sqlite3
+
 from backend.app_paths import DATABASE_PATH
 
 
@@ -7,8 +8,8 @@ def get_db_connection():
     Open one SQLite connection for a request.
 
     Foreign-key checking is enabled on every connection so jobs must
-    belong to real customers, work sessions must belong to real jobs,
-    and invoices must belong to real jobs/customers.
+    belong to real customers, work sessions/materials/receipts must belong
+    to real jobs, and invoices must belong to real jobs/customers.
     """
     connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
@@ -25,7 +26,7 @@ def _get_columns(
 
     WorkBooks is still early in development, so this small migration
     helper lets an existing workbooks.db gain new columns without
-    deleting Dad's existing data.
+    deleting existing data.
     """
     rows = connection.execute(
         f"PRAGMA table_info({table_name})"
@@ -41,9 +42,8 @@ def _add_job_columns(connection):
     """
     Upgrade an older jobs table to the current Job model.
 
-    We are keeping startedAt temporarily even though new work timing uses
-    work_sessions. It lets us migrate jobs that were started before the
-    multi-session timer was introduced without losing their recorded time.
+    startedAt is kept as a legacy migration column. New timing data lives
+    in work_sessions.
     """
     job_columns = _get_columns(
         connection,
@@ -71,12 +71,8 @@ def _migrate_old_work_times(connection):
     """
     Convert the original single-timer job format into one work session.
 
-    Older jobs stored work timing directly on jobs.startedAt and
-    jobs.completedAt. New jobs can contain many Start Work -> Pause Work
-    sessions in work_sessions.
-
-    The deterministic legacy ID makes this safe to run every time the
-    backend starts. INSERT OR IGNORE prevents duplicate migration rows.
+    After migration, clear jobs.startedAt so a legacy work session cannot
+    be recreated later if its new work_sessions record is edited/deleted.
     """
     connection.execute(
         """
@@ -99,14 +95,22 @@ def _migrate_old_work_times(connection):
         """
     )
 
+    connection.execute(
+        """
+        UPDATE jobs
+        SET startedAt = NULL
+        WHERE startedAt IS NOT NULL
+        """
+    )
+
 
 def create_database():
     """
     Create the WorkBooks database and apply small migrations.
 
-    This function is safe to run every time the backend starts. Existing
-    customers, jobs, invoices, business information, and work sessions are
-    preserved.
+    Safe to run every time the backend starts. Existing customers, jobs,
+    invoices, business information, work sessions, materials, and receipts
+    are preserved.
     """
     connection = get_db_connection()
 
@@ -150,14 +154,11 @@ def create_database():
             """
         )
 
-        # Add fields missing from older WorkBooks databases.
         _add_job_columns(connection)
 
         # ---------------------------------------------------------
         # Work sessions
         # ---------------------------------------------------------
-        # One job can contain any number of work sessions. endedAt is
-        # NULL while Dad is actively working.
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS work_sessions (
@@ -173,7 +174,6 @@ def create_database():
             """
         )
 
-        # Preserve time recorded with the original one-timer design.
         _migrate_old_work_times(connection)
 
         # ---------------------------------------------------------
@@ -193,7 +193,6 @@ def create_database():
             """
         )
 
-        # WorkBooks only needs one business-information record.
         connection.execute(
             """
             INSERT OR IGNORE INTO business_info (id)
@@ -226,6 +225,53 @@ def create_database():
         )
 
         # ---------------------------------------------------------
+        # Receipts
+        # ---------------------------------------------------------
+        # Receipts are created before materials because a material may
+        # optionally reference one.
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS receipts (
+                id TEXT PRIMARY KEY,
+                jobId TEXT NOT NULL,
+                fileName TEXT NOT NULL,
+                storedFileName TEXT NOT NULL,
+                vendor TEXT,
+                purchaseDate TEXT,
+                notes TEXT,
+
+                FOREIGN KEY (jobId)
+                    REFERENCES jobs(id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+
+        # ---------------------------------------------------------
+        # Materials
+        # ---------------------------------------------------------
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS materials (
+                id TEXT PRIMARY KEY,
+                jobId TEXT NOT NULL,
+                description TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                unitCost REAL NOT NULL,
+                receiptId TEXT,
+
+                FOREIGN KEY (jobId)
+                    REFERENCES jobs(id)
+                    ON DELETE CASCADE,
+
+                FOREIGN KEY (receiptId)
+                    REFERENCES receipts(id)
+                    ON DELETE SET NULL
+            )
+            """
+        )
+
+        # ---------------------------------------------------------
         # Indexes
         # ---------------------------------------------------------
         connection.execute(
@@ -246,6 +292,27 @@ def create_database():
             """
             CREATE INDEX IF NOT EXISTS idx_invoices_customerId
             ON invoices(customerId)
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_receipts_jobId
+            ON receipts(jobId)
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_materials_jobId
+            ON materials(jobId)
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_materials_receiptId
+            ON materials(receiptId)
             """
         )
 

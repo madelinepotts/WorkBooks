@@ -25,6 +25,10 @@ import {
 
 import { useNow } from "../utils/useNow";
 
+import JobMaterials from "../components/JobMaterials";
+import JobReceipts from "../components/JobReceipts";
+import WorkSessionEditor from "../components/WorkSessionEditor";
+
 
 type JobDetailsProps = {
   job: Job;
@@ -169,6 +173,10 @@ function JobDetails({
 
   /*
    * Current labor value.
+   *
+   * Materials are displayed separately by JobMaterials.
+   * We will combine labor + materials into invoice totals
+   * in the next step.
    */
   const currentAmount =
     job.pricingType === "fixed"
@@ -1177,7 +1185,7 @@ function JobDetails({
 
                     {job.status ===
                     "completed"
-                      ? "Job Total"
+                      ? "Labor Total"
                       : "Current Labor Total"}
 
                   </span>
@@ -1203,6 +1211,33 @@ function JobDetails({
               </button>
 
             </div>
+
+            {/*
+             * Individual recorded work periods.
+             *
+             * Dad can fix incorrect times, delete an
+             * accidental session, or enter missed time.
+             */}
+            <WorkSessionEditor
+              job={job}
+              onUpdateJob={onUpdateJob}
+            />
+
+            {/*
+             * Materials are kept in their own component so all
+             * material loading/editing/deleting logic stays out
+             * of this already-large page.
+             */}
+            <JobMaterials
+              job={job}
+            />
+
+            {/*
+            * Receipt images and PDFs for this job.
+            */}
+            <JobReceipts
+              job={job}
+            />
 
 
             {editError && (
@@ -1287,5 +1322,6 @@ function JobDetails({
     </>
   );
 }
+
 
 export default JobDetails;

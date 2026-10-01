@@ -1,11 +1,18 @@
-import { useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
 
 import { downloadInvoicePdf } from "../api/invoices";
+import {
+  getJobMaterials,
+} from "../api/materials";
 
 import type { BusinessInfo } from "../types/BusinessInfo";
 import type { Customer } from "../types/Customer";
 import type { Invoice, InvoiceStatus } from "../types/Invoice";
 import type { Job } from "../types/Jobs";
+import type { Material } from "../types/Material";
 
 import {
   formatMoney,
@@ -67,6 +74,113 @@ function Finances({
   onUpdateInvoice,
 }: FinancesProps) {
   const now = useNow();
+
+
+  /*
+   * Materials live in their own SQLite table rather than
+   * directly on the Job object.
+   *
+   * Load the material list for every job when the Finances
+   * page opens so invoice totals can include both labor
+   * and materials.
+   */
+  const [
+    materialsByJob,
+    setMaterialsByJob,
+  ] = useState<
+    Record<string, Material[]>
+  >({});
+
+
+  useEffect(() => {
+    let cancelled = false;
+
+
+    async function loadMaterials() {
+      try {
+        const entries =
+          await Promise.all(
+            jobs.map(
+              async (job) => {
+                const materials =
+                  await getJobMaterials(
+                    job.id
+                  );
+
+                return [
+                  job.id,
+                  materials,
+                ] as const;
+              }
+            )
+          );
+
+
+        if (!cancelled) {
+          setMaterialsByJob(
+            Object.fromEntries(
+              entries
+            )
+          );
+        }
+
+      } catch (error) {
+        console.error(
+          "Could not load materials for finances:",
+          error
+        );
+      }
+    }
+
+
+    void loadMaterials();
+
+
+    return () => {
+      cancelled = true;
+    };
+
+  }, [jobs]);
+
+
+  /*
+   * Material totals are calculated rather than stored.
+   */
+  function getMaterialSubtotal(
+    jobId: string
+  ): number {
+    const materials =
+      materialsByJob[jobId] ?? [];
+
+
+    return materials.reduce(
+      (sum, material) =>
+        sum +
+        (
+          material.quantity *
+          material.unitCost
+        ),
+      0
+    );
+  }
+
+
+  /*
+   * Full invoice value for one job.
+   */
+  function getInvoiceTotal(
+    job: Job
+  ): number {
+    return (
+      getJobAmount(
+        job,
+        now
+      ) +
+      getMaterialSubtotal(
+        job.id
+      )
+    );
+  }
 
 
   /*
@@ -248,9 +362,29 @@ function Finances({
     ? getCustomer(selectedJob.customerId)
     : undefined;
 
-  const selectedAmount = selectedJob
-    ? getJobAmount(selectedJob, now)
-    : 0;
+  /*
+   * Break the selected invoice into labor and materials.
+   */
+  const selectedLaborAmount =
+    selectedJob
+      ? getJobAmount(
+          selectedJob,
+          now
+        )
+      : 0;
+
+
+  const selectedMaterialAmount =
+    selectedJob
+      ? getMaterialSubtotal(
+          selectedJob.id
+        )
+      : 0;
+
+
+  const selectedAmount =
+    selectedLaborAmount +
+    selectedMaterialAmount;
 
 
   /*
@@ -302,7 +436,8 @@ function Finances({
     )
     .reduce(
       (sum, job) =>
-        sum + getJobAmount(job, now),
+        sum +
+        getInvoiceTotal(job),
       0
     );
 
@@ -1108,8 +1243,30 @@ function Finances({
                 )}
 
                 <div>
-                  <span>Total</span>
-                  <strong>{formatMoney(selectedAmount)}</strong>
+                  <span>Labor Total</span>
+                  <strong>
+                    {formatMoney(
+                      selectedLaborAmount
+                    )}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Materials</span>
+                  <strong>
+                    {formatMoney(
+                      selectedMaterialAmount
+                    )}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Invoice Total</span>
+                  <strong>
+                    {formatMoney(
+                      selectedAmount
+                    )}
+                  </strong>
                 </div>
               </div>
             )}
