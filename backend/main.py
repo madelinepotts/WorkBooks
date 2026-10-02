@@ -1,6 +1,9 @@
 import math
 import re
+import shutil
 import sqlite3
+import tempfile
+import zipfile
 
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +25,10 @@ from fastapi.middleware.cors import (
 
 from fastapi.responses import (
     FileResponse,
+)
+
+from starlette.background import (
+    BackgroundTask,
 )
 
 from pydantic import (
@@ -57,6 +64,8 @@ from reportlab.platypus import (
 )
 
 from backend.app_paths import (
+    DATA_DIR,
+    DATABASE_PATH,
     INVOICE_PDF_DIR,
     RECEIPT_DIR,
 )
@@ -150,6 +159,14 @@ class Material(BaseModel):
     quantity: float
     unitCost: float
     receiptId: str | None = None
+
+
+class MileageEntry(BaseModel):
+    id: str
+    jobId: str
+    tripDate: str
+    miles: float
+    notes: str | None = None
 
 
 class Receipt(BaseModel):
@@ -1094,6 +1111,55 @@ def _normalize_material(
     )
 
 
+def _normalize_mileage(
+    entry: MileageEntry,
+) -> MileageEntry:
+
+    notes = None
+
+    if entry.notes is not None:
+
+        cleaned_notes = _clean_multiline_text(
+            entry.notes
+        )
+
+        if cleaned_notes:
+            notes = cleaned_notes
+
+
+    return entry.model_copy(
+        update={
+
+            "id":
+                _require_id(
+                    entry.id,
+                    "Mileage ID",
+                ),
+
+            "jobId":
+                _require_id(
+                    entry.jobId,
+                    "Job ID",
+                ),
+
+            "tripDate":
+                _validate_date(
+                    entry.tripDate,
+                    "Trip date",
+                ),
+
+            "miles":
+                _positive_number(
+                    entry.miles,
+                    "Miles",
+                ),
+
+            "notes":
+                notes,
+        }
+    )
+
+
 def _normalize_invoice(
     invoice: Invoice,
 ) -> Invoice:
@@ -1682,6 +1748,385 @@ def _labor_amount(
         hours * rate,
         2,
     )
+
+
+# ---------------------------------------------------------
+# Backup / restore helpers
+# ---------------------------------------------------------
+
+_MAX_BACKUP_BYTES = (
+    2 *
+    1024 *
+    1024 *
+    1024
+)
+
+
+def _safe_remove(
+    path: Path,
+):
+    """
+    Remove a temporary file or directory if it exists.
+    """
+
+    try:
+
+        if path.is_dir():
+
+            shutil.rmtree(
+                path,
+                ignore_errors=True,
+            )
+
+        elif path.exists():
+
+            path.unlink(
+                missing_ok=True
+            )
+
+    except OSError:
+
+        pass
+
+
+def _snapshot_database(
+    destination: Path,
+):
+    """
+    Create a consistent SQLite snapshot without copying a
+    database file while SQLite may be writing to it.
+    """
+
+    source = get_db_connection()
+
+    snapshot = sqlite3.connect(
+        destination
+    )
+
+
+    try:
+
+        source.backup(
+            snapshot
+        )
+
+        snapshot.commit()
+
+    finally:
+
+        snapshot.close()
+
+        source.close()
+
+
+def _write_backup_archive(
+    archive_path: Path,
+):
+    """
+    Write the database, receipts, and generated invoices
+    into one ZIP archive.
+    """
+
+    snapshot_path = (
+        archive_path.parent /
+        "workbooks.db"
+    )
+
+
+    _snapshot_database(
+        snapshot_path
+    )
+
+
+    with zipfile.ZipFile(
+        archive_path,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED,
+    ) as archive:
+
+        archive.write(
+            snapshot_path,
+            arcname="workbooks.db",
+        )
+
+
+        for (
+            source_directory,
+            archive_directory,
+        ) in (
+            (
+                RECEIPT_DIR,
+                "receipts",
+            ),
+            (
+                INVOICE_PDF_DIR,
+                "invoices",
+            ),
+        ):
+
+            if not source_directory.exists():
+                continue
+
+
+            for path in (
+                source_directory
+                .rglob("*")
+            ):
+
+                if not path.is_file():
+                    continue
+
+
+                relative_path = (
+                    path.relative_to(
+                        source_directory
+                    )
+                )
+
+
+                archive.write(
+                    path,
+
+                    arcname=str(
+                        Path(
+                            archive_directory
+                        ) /
+                        relative_path
+                    ),
+                )
+
+
+    snapshot_path.unlink(
+        missing_ok=True
+    )
+
+
+def _validate_backup_member(
+    member_name: str,
+):
+    """
+    Reject path traversal and files outside the WorkBooks
+    backup layout before extracting a ZIP.
+    """
+
+    path = Path(
+        member_name
+    )
+
+
+    if (
+        path.is_absolute() or
+        ".." in path.parts
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Backup contains an unsafe file path."
+            ),
+        )
+
+
+    if not path.parts:
+        return
+
+
+    root = path.parts[0]
+
+
+    if root not in {
+        "workbooks.db",
+        "receipts",
+        "invoices",
+    }:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This ZIP is not a valid WorkBooks backup."
+            ),
+        )
+
+
+def _validate_backup_database(
+    database_path: Path,
+):
+    """
+    Confirm that the restored SQLite file opens cleanly and
+    contains the core WorkBooks tables.
+    """
+
+    try:
+
+        connection = sqlite3.connect(
+            database_path
+        )
+
+
+        integrity_row = (
+            connection.execute(
+                "PRAGMA integrity_check"
+            )
+            .fetchone()
+        )
+
+
+        if (
+            integrity_row is None or
+            integrity_row[0] != "ok"
+        ):
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "The backup database failed "
+                    "SQLite integrity checks."
+                ),
+            )
+
+
+        rows = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+            """
+        ).fetchall()
+
+
+        tables = {
+            row[0]
+            for row in rows
+        }
+
+
+        required_tables = {
+            "customers",
+            "jobs",
+            "invoices",
+        }
+
+
+        if not (
+            required_tables <=
+            tables
+        ):
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "The ZIP does not contain a "
+                    "valid WorkBooks database."
+                ),
+            )
+
+    except sqlite3.DatabaseError as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The backup contains an invalid "
+                "SQLite database."
+            ),
+        ) from error
+
+    finally:
+
+        try:
+            connection.close()
+        except (
+            UnboundLocalError,
+            AttributeError,
+        ):
+            pass
+
+
+def _restore_directory(
+    source: Path,
+    destination: Path,
+):
+    """
+    Replace one data directory with the directory contained
+    in the backup. Missing backup directories become empty.
+    """
+
+    if destination.exists():
+
+        shutil.rmtree(
+            destination
+        )
+
+
+    destination.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+
+    if not source.exists():
+        return
+
+
+    for path in source.rglob(
+        "*"
+    ):
+
+        relative_path = (
+            path.relative_to(
+                source
+            )
+        )
+
+
+        target = (
+            destination /
+            relative_path
+        )
+
+
+        if path.is_dir():
+
+            target.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+        elif path.is_file():
+
+            target.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+
+            shutil.copy2(
+                path,
+                target,
+            )
+
+
+def _remove_sqlite_sidecars():
+    """
+    Remove SQLite WAL/shared-memory files after replacing the
+    primary database file.
+    """
+
+    for suffix in (
+        "-wal",
+        "-shm",
+    ):
+
+        sidecar = Path(
+            str(
+                DATABASE_PATH
+            ) +
+            suffix
+        )
+
+
+        sidecar.unlink(
+            missing_ok=True
+        )
 
 
 # ---------------------------------------------------------
@@ -3732,6 +4177,75 @@ def update_job(
 
     try:
 
+        # -------------------------------------------------
+        # Load the existing job first.
+        #
+        # We need its old status so we can tell whether
+        # this update is attempting to reopen a completed
+        # job.
+        # -------------------------------------------------
+
+        existing_job = connection.execute(
+            """
+            SELECT *
+            FROM jobs
+            WHERE id = ?
+            """,
+
+            (
+                job_id,
+            ),
+        ).fetchone()
+
+
+        if existing_job is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Job not found.",
+            )
+
+
+        # -------------------------------------------------
+        # Once an invoice exists, the completed job becomes
+        # part of the financial record.
+        #
+        # Do not allow it to be reopened because additional
+        # labor/material changes could make the job disagree
+        # with its saved invoice.
+        # -------------------------------------------------
+
+        if (
+            existing_job["status"] == "completed"
+            and
+            job.status == "active"
+        ):
+
+            existing_invoice = connection.execute(
+                """
+                SELECT id
+                FROM invoices
+                WHERE jobId = ?
+                """,
+
+                (
+                    job_id,
+                ),
+            ).fetchone()
+
+
+            if existing_invoice is not None:
+
+                raise HTTPException(
+                    status_code=409,
+
+                    detail=(
+                        "This job has already been invoiced "
+                        "and cannot be reopened."
+                    ),
+                )
+
+
         if not _customer_exists(
             connection,
             job.customerId,
@@ -3829,7 +4343,6 @@ def update_job(
     finally:
 
         connection.close()
-
 
 @app.put(
     "/materials/{material_id}"
@@ -4295,6 +4808,575 @@ def update_invoice_status(
 
 
 # ---------------------------------------------------------
+# Mileage
+# ---------------------------------------------------------
+
+@app.post(
+    "/mileage"
+)
+def create_mileage_entry(
+    entry: MileageEntry,
+):
+
+    entry = _normalize_mileage(
+        entry
+    )
+
+    connection = get_db_connection()
+
+    try:
+
+        if not _job_exists(
+            connection,
+            entry.jobId,
+        ):
+
+            raise HTTPException(
+                status_code=404,
+                detail="Job not found.",
+            )
+
+
+        connection.execute(
+            """
+            INSERT INTO mileage (
+                id,
+                jobId,
+                tripDate,
+                miles,
+                notes
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                entry.id,
+                entry.jobId,
+                entry.tripDate,
+                entry.miles,
+                entry.notes,
+            ),
+        )
+
+        connection.commit()
+
+    except sqlite3.IntegrityError as error:
+
+        raise HTTPException(
+            status_code=409,
+            detail="Could not create mileage entry.",
+        ) from error
+
+    finally:
+
+        connection.close()
+
+
+    return entry
+
+
+@app.get(
+    "/jobs/{job_id}/mileage"
+)
+def get_job_mileage(
+    job_id: str,
+):
+
+    job_id = _require_id(
+        job_id,
+        "Job ID",
+    )
+
+    connection = get_db_connection()
+
+    try:
+
+        if not _job_exists(
+            connection,
+            job_id,
+        ):
+
+            raise HTTPException(
+                status_code=404,
+                detail="Job not found.",
+            )
+
+
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM mileage
+            WHERE jobId = ?
+            ORDER BY tripDate DESC, id DESC
+            """,
+            (
+                job_id,
+            ),
+        ).fetchall()
+
+
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+    finally:
+
+        connection.close()
+
+
+@app.put(
+    "/mileage/{entry_id}"
+)
+def update_mileage_entry(
+    entry_id: str,
+    entry: MileageEntry,
+):
+
+    entry_id = _require_id(
+        entry_id,
+        "Mileage ID",
+    )
+
+
+    if entry.id != entry_id:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Mileage ID does not match the URL.",
+        )
+
+
+    entry = _normalize_mileage(
+        entry
+    )
+
+    connection = get_db_connection()
+
+    try:
+
+        if not _job_exists(
+            connection,
+            entry.jobId,
+        ):
+
+            raise HTTPException(
+                status_code=404,
+                detail="Job not found.",
+            )
+
+
+        existing = connection.execute(
+            """
+            SELECT id
+            FROM mileage
+            WHERE id = ?
+            """,
+            (
+                entry_id,
+            ),
+        ).fetchone()
+
+
+        if existing is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Mileage entry not found.",
+            )
+
+
+        connection.execute(
+            """
+            UPDATE mileage
+            SET
+                jobId = ?,
+                tripDate = ?,
+                miles = ?,
+                notes = ?
+            WHERE id = ?
+            """,
+            (
+                entry.jobId,
+                entry.tripDate,
+                entry.miles,
+                entry.notes,
+                entry_id,
+            ),
+        )
+
+        connection.commit()
+
+    finally:
+
+        connection.close()
+
+
+    return entry
+
+
+@app.delete(
+    "/mileage/{entry_id}"
+)
+def delete_mileage_entry(
+    entry_id: str,
+):
+
+    entry_id = _require_id(
+        entry_id,
+        "Mileage ID",
+    )
+
+    connection = get_db_connection()
+
+    try:
+
+        cursor = connection.execute(
+            """
+            DELETE FROM mileage
+            WHERE id = ?
+            """,
+            (
+                entry_id,
+            ),
+        )
+
+
+        if cursor.rowcount == 0:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Mileage entry not found.",
+            )
+
+
+        connection.commit()
+
+    finally:
+
+        connection.close()
+
+
+    return {
+        "deleted": True,
+        "id": entry_id,
+    }
+
+
+@app.post(
+    "/restore-backup"
+)
+async def restore_backup(
+    backup: UploadFile = File(...),
+):
+    """
+    Restore a WorkBooks ZIP backup.
+
+    The archive and SQLite database are fully validated before
+    the current business data is replaced.
+    """
+
+    original_name = (
+        backup.filename or ""
+    )
+
+
+    if (
+        Path(
+            original_name
+        ).suffix.lower()
+        != ".zip"
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Choose a WorkBooks ZIP backup."
+            ),
+        )
+
+
+    temp_root = Path(
+        tempfile.mkdtemp(
+            prefix="workbooks-restore-"
+        )
+    )
+
+
+    archive_path = (
+        temp_root /
+        "restore.zip"
+    )
+
+
+    extract_root = (
+        temp_root /
+        "extracted"
+    )
+
+
+    safety_root = (
+        temp_root /
+        "safety"
+    )
+
+
+    extract_root.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+
+    safety_root.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+
+    try:
+
+        total_bytes = 0
+
+
+        with archive_path.open(
+            "wb"
+        ) as output:
+
+            while True:
+
+                chunk = await backup.read(
+                    1024 * 1024
+                )
+
+
+                if not chunk:
+                    break
+
+
+                total_bytes += len(
+                    chunk
+                )
+
+
+                if (
+                    total_bytes >
+                    _MAX_BACKUP_BYTES
+                ):
+
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            "Backup file is too large."
+                        ),
+                    )
+
+
+                output.write(
+                    chunk
+                )
+
+
+        try:
+
+            with zipfile.ZipFile(
+                archive_path,
+                mode="r",
+            ) as archive:
+
+                for member in (
+                    archive.infolist()
+                ):
+
+                    _validate_backup_member(
+                        member.filename
+                    )
+
+
+                archive.extractall(
+                    extract_root
+                )
+
+        except zipfile.BadZipFile as error:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "The selected file is not "
+                    "a valid ZIP backup."
+                ),
+            ) from error
+
+
+        restored_database = (
+            extract_root /
+            "workbooks.db"
+        )
+
+
+        if not restored_database.is_file():
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "The backup is missing "
+                    "workbooks.db."
+                ),
+            )
+
+
+        _validate_backup_database(
+            restored_database
+        )
+
+
+        # -------------------------------------------------
+        # Make an automatic temporary safety copy first.
+        # -------------------------------------------------
+
+        safety_database = (
+            safety_root /
+            "workbooks.db"
+        )
+
+
+        _snapshot_database(
+            safety_database
+        )
+
+
+        safety_receipts = (
+            safety_root /
+            "receipts"
+        )
+
+
+        safety_invoices = (
+            safety_root /
+            "invoices"
+        )
+
+
+        if RECEIPT_DIR.exists():
+
+            shutil.copytree(
+                RECEIPT_DIR,
+                safety_receipts,
+            )
+
+
+        if INVOICE_PDF_DIR.exists():
+
+            shutil.copytree(
+                INVOICE_PDF_DIR,
+                safety_invoices,
+            )
+
+
+        try:
+
+            staged_database = (
+                DATA_DIR /
+                ".workbooks-restore.db"
+            )
+
+
+            shutil.copy2(
+                restored_database,
+                staged_database,
+            )
+
+
+            _remove_sqlite_sidecars()
+
+
+            staged_database.replace(
+                DATABASE_PATH
+            )
+
+
+            _restore_directory(
+                extract_root /
+                "receipts",
+
+                RECEIPT_DIR,
+            )
+
+
+            _restore_directory(
+                extract_root /
+                "invoices",
+
+                INVOICE_PDF_DIR,
+            )
+
+
+            # Apply any harmless schema migrations if the
+            # restored backup came from an older WorkBooks.
+            create_database()
+
+        except Exception:
+
+            # Best-effort rollback to the pre-restore data.
+            try:
+
+                rollback_database = (
+                    DATA_DIR /
+                    ".workbooks-rollback.db"
+                )
+
+
+                shutil.copy2(
+                    safety_database,
+                    rollback_database,
+                )
+
+
+                _remove_sqlite_sidecars()
+
+
+                rollback_database.replace(
+                    DATABASE_PATH
+                )
+
+
+                _restore_directory(
+                    safety_receipts,
+                    RECEIPT_DIR,
+                )
+
+
+                _restore_directory(
+                    safety_invoices,
+                    INVOICE_PDF_DIR,
+                )
+
+
+                create_database()
+
+            except Exception:
+
+                pass
+
+
+            raise
+
+
+        return {
+            "message":
+                "Backup restored successfully.",
+        }
+
+    finally:
+
+        await backup.close()
+
+
+        shutil.rmtree(
+            temp_root,
+            ignore_errors=True,
+        )
+
+
+# ---------------------------------------------------------
 # GET requests
 # ---------------------------------------------------------
 
@@ -4305,6 +5387,70 @@ def root():
         "message":
             "WorkBooks backend is running!",
     }
+
+
+@app.get(
+    "/backup"
+)
+def download_backup():
+    """
+    Create and download a complete WorkBooks backup.
+    """
+
+    temp_root = Path(
+        tempfile.mkdtemp(
+            prefix="workbooks-backup-"
+        )
+    )
+
+
+    timestamp = (
+        datetime.now()
+        .strftime(
+            "%Y-%m-%d-%H%M%S"
+        )
+    )
+
+
+    filename = (
+        f"WorkBooks-Backup-"
+        f"{timestamp}.zip"
+    )
+
+
+    archive_path = (
+        temp_root /
+        filename
+    )
+
+
+    try:
+
+        _write_backup_archive(
+            archive_path
+        )
+
+    except Exception:
+
+        shutil.rmtree(
+            temp_root,
+            ignore_errors=True,
+        )
+
+        raise
+
+
+    return FileResponse(
+        path=archive_path,
+        media_type="application/zip",
+        filename=filename,
+
+        background=BackgroundTask(
+            shutil.rmtree,
+            temp_root,
+            ignore_errors=True,
+        ),
+    )
 
 
 @app.get(

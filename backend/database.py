@@ -272,6 +272,25 @@ def create_database():
         )
 
         # ---------------------------------------------------------
+        # Mileage
+        # ---------------------------------------------------------
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mileage (
+                id TEXT PRIMARY KEY,
+                jobId TEXT NOT NULL,
+                tripDate TEXT NOT NULL,
+                miles REAL NOT NULL,
+                notes TEXT,
+
+                FOREIGN KEY (jobId)
+                    REFERENCES jobs(id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+
+        # ---------------------------------------------------------
         # Indexes
         # ---------------------------------------------------------
         connection.execute(
@@ -313,6 +332,13 @@ def create_database():
             """
             CREATE INDEX IF NOT EXISTS idx_materials_receiptId
             ON materials(receiptId)
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_mileage_jobId
+            ON mileage(jobId)
             """
         )
 

@@ -82,6 +82,7 @@ Write-Host "[3/5] Building FastAPI sidecar..." -ForegroundColor Yellow
     --collect-all uvicorn `
     --collect-all fastapi `
     --collect-all reportlab `
+    --collect-all multipart `
     $BackendEntry
 
 if ($LASTEXITCODE -ne 0) {

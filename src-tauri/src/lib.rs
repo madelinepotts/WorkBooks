@@ -1,6 +1,5 @@
 use std::{
     net::{SocketAddr, TcpStream},
-    path::PathBuf,
     process::Command as StdCommand,
     sync::Mutex,
     thread,
@@ -220,7 +219,7 @@ pub fn run() {
                 }
 
 
-                let mut backend_command =
+                let backend_command =
                     app
                         .shell()
                         .sidecar(
@@ -241,9 +240,9 @@ pub fn run() {
                  * %LOCALAPPDATA%\WorkBooks
                  */
                 #[cfg(debug_assertions)]
-                {
+                let backend_command = {
                     let development_data_dir =
-                        PathBuf::from(
+                        std::path::PathBuf::from(
                             env!(
                                 "CARGO_MANIFEST_DIR"
                             )
@@ -253,13 +252,12 @@ pub fn run() {
                         );
 
 
-                    backend_command =
-                        backend_command.env(
-                            "WORKBOOKS_DATA_DIR",
-                            development_data_dir
-                                .as_os_str(),
-                        );
-                }
+                    backend_command.env(
+                        "WORKBOOKS_DATA_DIR",
+                        development_data_dir
+                            .as_os_str(),
+                    )
+                };
 
 
                 /*

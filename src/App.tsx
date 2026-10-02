@@ -702,6 +702,12 @@ function App() {
         selectedJobCustomer && (
           <JobDetails
             job={selectedJob}
+            hasInvoice={
+              invoices.some(
+                (invoice) =>
+                  invoice.jobId === selectedJob.id
+              )
+            }
             customer={selectedJobCustomer}
             jobs={jobs}
 
